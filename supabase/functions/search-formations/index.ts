@@ -6,17 +6,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- CONFIGURATION EXPERT V4 (FILTRAGE MÉTIER STRICT & BLACKLIST) ---
-const SYSTEM_PROMPT = `Tu es un expert en ingénierie de formation pour OCAPIAT.
-Ton but est d'identifier les lieux RÉELS de formation (Campus, Lycées, CFA) correspondant EXACTEMENT à la technicité du métier.
+// --- CONFIGURATION EXPERT V5 (DENSITÉ & PRÉCISION) ---
+const SYSTEM_PROMPT = `Tu es un expert en orientation scolaire pour OCAPIAT.
+Ton objectif est de fournir une liste DENSE et EXHAUSTIVE de lieux de formation.
 
-RÈGLES CRITIQUES :
-1. LIEU PHYSIQUE : Trouve le Lycée, le CFA ou l'IUT précis. Pas de sièges sociaux.
-2. PERTINENCE MÉTIER (CRITIQUE) : 
-   - Ne mélange pas les familles. 
-   - Si on cherche "Maintenance", EXCLURE "Logistique" et "Transport routier".
-   - Si on cherche "Logistique", EXCLURE "Maintenance".
-3. HIÉRARCHIE : Respecte les niveaux (CAP vers Ingénieur).
+RÈGLES D'OR :
+1. QUANTITÉ & QUALITÉ : Pour une grande ville comme Paris, tu dois trouver au moins 5 à 10 établissements pertinents. Ne t'arrête pas au premier résultat.
+2. LIEU PHYSIQUE : Cherche les Lycées, CFA, IUT, Écoles de Commerce. Pas de sièges sociaux.
+3. FAMILLES MÉTIERS : Respecte strictement les mots-clés techniques fournis ci-dessous.
 
 FORMAT JSON STRICT :
 {
@@ -24,11 +21,11 @@ FORMAT JSON STRICT :
   "ville_reference": "string",
   "formations": [
     {
-      "intitule": "Nom complet",
+      "intitule": "Nom complet (ex: BTS CCST)",
       "organisme": "Nom de l'école",
       "rncp": "Code ou null",
-      "categorie": "Diplôme" | "Certification" | "Habilitation (CACES/Permis)",
-      "niveau": "3" (CAP) | "4" (Bac) | "5" (Bac+2) | "6" (Bac+3) | "N/A",
+      "categorie": "Diplôme" | "Certification" | "Habilitation",
+      "niveau": "3" | "4" | "5" | "6" | "N/A",
       "ville": "Ville exacte du CAMPUS",
       "distance_km": number,
       "site_web": "URL",
@@ -50,56 +47,53 @@ Deno.serve(async (req: Request) => {
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    console.log(`🔎 Recherche V4 (Expert+Blacklist): ${metier} autour de ${ville}`);
+    console.log(`🔎 Recherche V5 (Densité): ${metier} à ${ville}`);
 
-    // --- ENRICHISSEMENT INTELLIGENT & BLACKLISTING ---
+    // --- ENRICHISSEMENT INTELLIGENT (AJOUT BTS CCST & AGRI) ---
     let motsClesTechniques = "";
-    let instructionsExclusion = ""; // Nouvelle variable pour bannir les erreurs
+    let instructionsExclusion = ""; 
 
     const m = metier.toLowerCase();
 
     if (m.includes("services techniques") || m.includes("maintenance")) {
-        // Cible : Maintenance Industrielle, Électro, Automatisme
-        motsClesTechniques = "BTS Maintenance des Systèmes (MS), BUT Génie Industriel et Maintenance (GIM), BTS Électrotechnique, BTS CRSA (Automatisme), Bac Pro MSPC (Systèmes de Production Connectés), Licence Pro Maintenance industrielle, Ingénieur Génie Industriel.";
-        // On bannit explicitement la logistique et le transport routier (camions)
-        instructionsExclusion = "EXCLURE STRICTEMENT les formations en : Logistique, Magasinage, Transport Routier, Conduite de poids lourds, Maintenance automobile légère.";
+        motsClesTechniques = "BTS Maintenance des Systèmes (MS), BUT Génie Industriel et Maintenance (GIM), BTS Électrotechnique, BTS CRSA (Automatisme), Bac Pro MSPC.";
+        instructionsExclusion = "EXCLURE : Logistique, Transport Routier, Maintenance auto.";
     } 
     else if (m.includes("silo")) {
-        // Cible : Agricole & Maintenance Silo
         motsClesTechniques = "Bac Pro Agroéquipement, CAP Maintenance des matériels, CQP Agent de silo, CS Maintenance, BTSA GDEA.";
-        instructionsExclusion = "EXCLURE : Cuisine, Transformation alimentaire pure (boucher/boulanger), Transport de voyageurs.";
+        instructionsExclusion = "EXCLURE : Boulangerie, Cuisine.";
     }
     else if (m.includes("magasinier") || m.includes("cariste") || m.includes("logistique")) {
-        // Cible : Logistique pure
-        motsClesTechniques = "Titre Pro Agent Magasinier, Bac Pro Logistique, TSMEL, CACES R489, Gestion des stocks, BUT QLIO.";
-        instructionsExclusion = "EXCLURE : Maintenance industrielle, Mécanique pure, Électrotechnique.";
+        motsClesTechniques = "Titre Pro Agent Magasinier, Bac Pro Logistique, TSMEL, CACES R489, BUT QLIO (Qualité Logistique).";
+        instructionsExclusion = "EXCLURE : Maintenance industrielle, Mécanique.";
     }
     else if (m.includes("conduite") || m.includes("ligne")) {
-        // Cible : Production
-        motsClesTechniques = "Pilote de ligne de production, CQP Conducteur de ligne, BTS Pilotage de procédés, Bac Pro PSPA.";
-        instructionsExclusion = "EXCLURE : Conduite de camion, Permis poids lourd.";
+        motsClesTechniques = "Pilote de ligne de production, CQP Conducteur de ligne, BTS Pilotage de procédés, Bac Pro PSPA (Pilotage de systèmes).";
+        instructionsExclusion = "EXCLURE : Poids lourds, Transport.";
     }
+    // --- C'EST ICI QUE J'AI CORRIGÉ POUR TECHNICO-COMMERCIAL ---
     else if (m.includes("commercial")) {
-        motsClesTechniques = "BTS NDRC, Technico-commercial, Bachelor Business Developer, BTS ACSE.";
-        instructionsExclusion = "EXCLURE : Comptabilité pure, RH.";
+        // Ajout massif des diplômes clés (CCST, TC, BTSA)
+        motsClesTechniques = "BTS CCST (Conseil et Commercialisation de Solutions Techniques - ex BTS TC), BTSA Technico-commercial (Agrofournitures / Vins / Jardins), BTS NDRC, BUT Techniques de Commercialisation (TC), Licence Pro Technico-Commercial, Bachelor Business Developer.";
+        instructionsExclusion = "EXCLURE : Comptabilité, Gestion pure, RH, Secrétariat.";
     }
     else {
-        motsClesTechniques = "Formations diplômantes, Titres Pro, CQP de branche reconnus.";
+        motsClesTechniques = "Formations diplômantes, Titres Pro RNCP, CQP de branche.";
         instructionsExclusion = "";
     }
 
-    const userPrompt = `Trouve les centres de formation RÉELS pour devenir "${metier}" autour de "${ville}" (Max 60km).
+    const userPrompt = `Trouve une liste complète (minimum 6-8 résultats si possible) des formations pour "${metier}" à "${ville}" (Max 60km).
     
-    CONTEXTE TECHNIQUE OBLIGATOIRE (Mots-clés) : ${motsClesTechniques}
+    DIPLÔMES CIBLES (Mots-clés prioritaires) : ${motsClesTechniques}
     
-    ⛔ LISTE NOIRE (A NE PAS PROPOSER) : ${instructionsExclusion}
+    ⛔ EXCLUSIONS : ${instructionsExclusion}
     
     Filtre Niveau : ${niveau === 'all' ? 'Tout (CAP à Bac+5)' : 'Niveau ' + niveau}.
 
     INSTRUCTIONS :
-    1. Ignore les sièges sociaux. Cherche les Lycées (Pro/Agricole), IUT, CFA, MFR.
-    2. Respecte scrupuleusement la LISTE NOIRE ci-dessus. Si une formation correspond à un mot interdit, ne l'affiche pas.
-    3. Indique la distance réelle.
+    1. Diversifie les organismes : Cherche à la fois les Lycées Publics, les CFA, les Écoles de Commerce et les IUT.
+    2. Pour Technico-Commercial, privilégie le BTS CCST et le BTSA Technico-commercial.
+    3. Indique la distance réelle et le code RNCP.
     
     Retourne uniquement le JSON.`;
 
