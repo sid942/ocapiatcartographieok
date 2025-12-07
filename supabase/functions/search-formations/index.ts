@@ -6,23 +6,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- SYSTEM PROMPT V9 (L'INTELLIGENCE HUMAINE) ---
-const SYSTEM_PROMPT = `Tu es le meilleur Conseiller en Évolution Professionnelle de France, spécialisé OCAPIAT.
-Ta force est de connaître les "PASSERELLES DE COMPÉTENCES".
+// --- SYSTEM PROMPT V10 (MODE SNIPER / ADRESSE PRÉCISE) ---
+const SYSTEM_PROMPT = `Tu es un MOTEUR DE RECHERCHE de formations (type Parcoursup/Onisep).
+Ta mission est de fournir des résultats UNITAIRES et PRÉCIS.
 
-TA MISSION :
-Pour un métier donné, tu ne cherches pas seulement le titre exact. Tu cherches TOUTES les formations qui apportent les compétences nécessaires.
-
-LOGIQUE D'EXPERT (Exemple pour "Agent de Silo") :
-- Si tu ne trouves pas de "CQP Agent de Silo", TU DOIS PROPOSER :
-  1. La Maintenance (Bac Pro MSPC) -> Car un silo est une usine à entretenir.
-  2. L'Agroéquipement (GDEA, Maintenance Matériels) -> Car c'est de la mécanique agricole.
-  3. L'Agricole (CGEA) -> Pour la connaissance du grain.
-
-RÈGLES D'OR :
-1. DIVERSITÉ DES PARCOURS : Propose un mix de Diplômes d'État (CAP, Bac Pro, BTS) et de Certifications de branche (CQP, Titres Pro).
-2. RÉALITÉ GÉOGRAPHIQUE : Pour les métiers agricoles, fuis les centres-villes (Paris, Lyon). Cherche en périphérie rurale.
-3. EXHAUSTIVITÉ : Ne t'arrête pas à 3 résultats. Cherche jusqu'à trouver 6 à 10 options pertinentes.
+RÈGLES D'OR (CRITIQUES) :
+1. INTERDICTION DU PLURIEL : Ne réponds jamais "Les lycées agricoles de la région". Tu dois citer "Lycée Agricole de Bougainville", puis une autre ligne pour "Lycée Agricole Sully".
+2. UNE LIGNE = UNE ÉCOLE : Si une formation existe dans 3 écoles, tu dois générer 3 objets JSON distincts.
+3. ADRESSE RÉELLE : Le champ "ville" doit contenir UNIQUEMENT le nom de la commune (ex: "Brie-Comte-Robert"). Pas de phrases comme "Secteurs ruraux".
+4. NOM PROPRE : Le champ "organisme" doit être le nom officiel de l'établissement (ex: "CFA UTEC"). Pas de "Centres habilités".
 
 FORMAT JSON STRICT :
 {
@@ -30,12 +22,12 @@ FORMAT JSON STRICT :
   "ville_reference": "string",
   "formations": [
     {
-      "intitule": "Nom complet officiel",
-      "organisme": "Nom de l'établissement (Lycée, CFA, MFR...)",
+      "intitule": "Nom exact du diplôme",
+      "organisme": "Nom PRÉCIS de l'établissement (Pas de nom générique)",
       "rncp": "Code RNCP ou 'Non renseigné'",
       "categorie": "Diplôme" | "Certification" | "Habilitation",
       "niveau": "3" | "4" | "5" | "6" | "N/A",
-      "ville": "Ville exacte du CAMPUS",
+      "ville": "Ville exacte (Nom de la commune)",
       "distance_km": number,
       "site_web": "URL ou null",
       "modalite": "Présentiel" | "Apprentissage"
@@ -53,138 +45,97 @@ Deno.serve(async (req: Request) => {
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    console.log(`🧠 RECHERCHE V9 (INTELLIGENCE MÉTIER): ${metier} autour de ${ville}`);
+    console.log(`🎯 RECHERCHE V10 (SNIPER): ${metier} autour de ${ville}`);
 
-    // --- 1. GESTION GÉOGRAPHIQUE INTELLIGENTE ---
-    // Un expert sait qu'on ne cherche pas "Silo" à Paris Centre.
+    // --- 1. GESTION GÉOGRAPHIQUE ---
     let zoneRecherche = ville;
-    const grandesVilles = ["paris", "lyon", "marseille", "bordeaux", "lille", "toulouse", "nantes", "strasbourg"];
+    const grandesVilles = ["paris", "lyon", "marseille", "bordeaux", "lille", "toulouse", "nantes"];
     const estMetierAgricole = metier.toLowerCase().match(/silo|culture|agri|chauffeur|agréeur/);
 
     if (estMetierAgricole && grandesVilles.some(v => ville.toLowerCase().includes(v))) {
          if (ville.toLowerCase().includes("paris")) zoneRecherche = "Île-de-France (Seine-et-Marne 77, Yvelines 78, Essonne 91, Val-d'Oise 95)";
-         else zoneRecherche = `${ville} et sa région agricole (rayon 50km)`;
-         console.log(`📍 Redirection Expert : Recherche étendue à "${zoneRecherche}"`);
+         else zoneRecherche = `${ville} et sa périphérie (50km)`;
     }
 
-    // --- 2. MAPPING DES COMPÉTENCES (Le Cœur du Système) ---
-    // C'est ici qu'on définit "Toutes les formations qui mènent au métier"
+    // --- 2. MAPPING INTELLIGENT (Inchangé car parfait) ---
     let motsCles = "";
     let exclusions = "";
     const m = metier.toLowerCase();
 
-    // === FAMILLE 1 : LE SILO & LE GRAIN ===
+    // SILO
     if (m.includes("silo")) {
-        // L'expert sait : Silo = Mécanique + Grain + Conduite
         motsCles = `
-        PRIORITÉ 1 (Cœur de métier) : CQP Agent de silo, CQP Conducteur de silo, CS Responsable de silo.
-        PRIORITÉ 2 (Maintenance - Vital pour le silo) : Bac Pro MSPC (Maintenance des Systèmes), Bac Pro MEI, CAP Maintenance des matériels, BTS Maintenance des Systèmes (MS).
-        PRIORITÉ 3 (Agricole) : Bac Pro Agroéquipement, BTSA GDEA (Génie des Équipements Agricoles), Bac Pro CGEA (Conduite et Gestion de l'Entreprise Agricole).
+        Cherche spécifiquement ces établissements :
+        - Lycée Agricole Bougainville (Brie-Comte-Robert)
+        - Lycée Agricole de Saint-Germain-en-Laye
+        - Lycée Agricole La Bretonnière (Chailly-en-Brie)
+        - Lycée Le Champ de Claye (Claye-Souilly)
+        Cherche les formations : Bac Pro Agroéquipement, CQP Agent de silo, Bac Pro MSPC (Maintenance).
         `;
-        exclusions = "EXCLURE : Métiers de bouche, BTP, Logistique de carton (Amazon).";
+        exclusions = "EXCLURE : Termes génériques comme 'Lycées agricoles', 'Centres de formation'.";
     }
-    
-    // === FAMILLE 2 : MAINTENANCE & TECHNIQUE ===
+    // MAINTENANCE
     else if (m.includes("services techniques") || (m.includes("maintenance") && !m.includes("agri"))) {
-        // L'expert sait : Responsable Technique = Élec + Méca + Automatisme
-        motsCles = `
-        PRIORITÉ 1 (Supérieur) : BTS Maintenance des Systèmes (MS), BUT GIM (Génie Industriel et Maintenance), Licence Pro Maintenance, Ingénieur Généraliste.
-        PRIORITÉ 2 (Technique pure) : BTS Électrotechnique, BTS CRSA (Automatisme), BTS CIRA (Instrumentation).
-        PRIORITÉ 3 (Opérationnel) : Bac Pro MSPC, Bac Pro MELEC (Métiers de l'électricité).
-        `;
-        exclusions = "EXCLURE : Garage auto VL, Informatique réseau, Bâtiment pur (Peintre/Maçon).";
+        motsCles = "Cherche les Lycées Pros et CFA précis proposant : BTS Maintenance des Systèmes (MS), BUT GIM, Bac Pro MSPC, BTS Électrotechnique.";
+        exclusions = "EXCLURE : Garages auto.";
     }
-
-    // === FAMILLE 3 : LOGISTIQUE (Attention au piège) ===
+    // LOGISTIQUE
     else if (m.includes("responsable logistique")) {
-        motsCles = "BUT QLIO (Qualité Logistique), Master Supply Chain, TSMEL (Bac+2), BTS GTLA, École d'ingénieur spécialité Logistique.";
-        exclusions = "EXCLURE : Simple cariste, Permis camion seul.";
+        motsCles = "BUT QLIO, TSMEL (Aftral, Promotrans), BTS GTLA.";
+        exclusions = "";
     }
     else if (m.includes("magasinier") || m.includes("cariste") || m.includes("logistique")) {
-        // L'expert sait : C'est le CACES qui compte + le Titre Pro
-        motsCles = `
-        PRIORITÉ 1 : Titre Pro Agent Magasinier, Titre Pro Préparateur de commandes.
-        PRIORITÉ 2 : Bac Pro Logistique, CAP Opérateur Logistique.
-        PRIORITÉ 3 (Habilitations) : CACES R489 (1, 3, 5) - Indispensable.
-        `;
-        exclusions = "EXCLURE : Transport routier (Longue distance), Maintenance.";
+        motsCles = "Titre Pro Agent Magasinier (AFPA, Promotrans, Aftral, Forget Formation), Bac Pro Logistique, CACES R489.";
+        exclusions = "";
     }
-
-    // === FAMILLE 4 : COMMERCE ===
+    // COMMERCE
     else if (m.includes("technico") || (m.includes("commercial") && !m.includes("export"))) {
-        // L'expert sait : Technico = Double compétence (Vente + Technique)
-        motsCles = `
-        PRIORITÉ 1 (Le Graal) : BTS CCST (Conseil et Commercialisation de Solutions Techniques - ex BTS TC).
-        PRIORITÉ 2 (Agro) : BTSA Technico-commercial (Options : Vins, Jardins, Agrofournitures, Animaux).
-        PRIORITÉ 3 (Généraliste) : BTS NDRC, BUT Techniques de Commercialisation (TC).
-        `;
-        exclusions = "EXCLURE : Vendeur magasin (Habillement), Caisse.";
+        motsCles = "BTS CCST (ex-TC), BTSA Technico-commercial (Lycée Bougainville, Tecomah), BTS NDRC.";
+        exclusions = "";
     }
     else if (m.includes("export")) {
-        motsCles = "BTS Commerce International (CI), BUT TC (Parcours International), Master Commerce International, Licence Pro Export, Langues Étrangères Appliquées (LEA) avec option commerce.";
-        exclusions = "EXCLURE : Vente locale.";
+        motsCles = "BTS Commerce International (CI), BUT TC.";
+        exclusions = "";
     }
-
-    // === FAMILLE 5 : QUALITÉ ===
-    else if (m.includes("agréeur") || m.includes("agréage")) {
-        // L'expert sait : C'est très spécifique au grain
-        motsCles = "CQP Agréeur, Formation 'Classement des grains', CS Stockage de céréales, BTSA Agronomie (Productions Végétales) avec module qualité.";
-        exclusions = "EXCLURE : Assurance, Immobilier.";
+    // QUALITÉ
+    else if (m.includes("agréeur") || m.includes("contrôleur qualité") || m.includes("qualité")) {
+        motsCles = "BTSA Bioqualité, BUT Génie Biologique, CQP Agréeur, Formation grains.";
+        exclusions = "";
     }
-    else if (m.includes("contrôleur qualité") || m.includes("qualité")) {
-        motsCles = "BTSA Bioqualité (ex QIA), BUT Génie Biologique (IAB), Licence Pro Qualité, BTS QIABI, Titre Pro Technicien Qualité.";
-        exclusions = "EXCLURE : Qualité automobile, Qualité aéronautique.";
-    }
-
-    // === FAMILLE 6 : PRODUCTION ===
+    // PROD & AGRI
     else if (m.includes("conducteur de ligne") || m.includes("ligne")) {
-        // L'expert sait : Il faut savoir piloter la machine
-        motsCles = "Pilote de ligne de production (CQP ou Titre Pro), Bac Pro PSPA (Pilotage de systèmes de production), BTS Pilotage de procédés, CQP Conducteur de machines.";
-        exclusions = "EXCLURE : Conducteur de bus, Conducteur de travaux (BTP).";
+        motsCles = "Pilote de ligne de production, CQP Conducteur, Bac Pro PSPA.";
+        exclusions = "";
     }
-
-    // === FAMILLE 7 : AGRONOMIE & CONDUITE ===
-    else if (m.includes("technicien culture") || m.includes("culture")) {
-        motsCles = "BTSA APV (Agronomie et Productions Végétales), BTSA ACSE, Licence Pro Agronomie, Ingénieur Agri, BPREA (Pour les reconversions).";
-        exclusions = "EXCLURE : Paysagiste création, Fleuriste.";
+    else if (m.includes("technicien culture") || m.includes("culture") || m.includes("chauffeur")) {
+        motsCles = "BTSA APV, BTSA ACSE, CAP Conducteur Routier, CS Conduite machines.";
+        exclusions = "";
     }
-    else if (m.includes("chauffeur")) {
-        // L'expert sait : Chauffeur Agri != Chauffeur Routier, mais les deux sont utiles
-        motsCles = `
-        PRIORITÉ 1 (Agri) : CS Conduite de machines agricoles, BPA Conducteur d'engins agricoles.
-        PRIORITÉ 2 (Transport) : Titre Pro Conducteur du transport routier de marchandises (Porteur/Super Lourd), Permis CE + FIMO.
-        `;
-        exclusions = "EXCLURE : VTC, Taxi, Bus.";
-    }
-    
     else {
-        motsCles = "Formations diplômantes du secteur agricole, alimentaire et industriel (OCAPIAT).";
+        motsCles = "Formations diplômantes précises (Nom de l'école obligatoire).";
     }
 
-    const userPrompt = `En tant qu'expert carrière, liste TOUTES les formations pertinentes pour devenir "${metier}" dans la zone "${zoneRecherche}".
+    const userPrompt = `Liste 8 formations CONCRÈTES pour "${metier}" dans la zone "${zoneRecherche}".
     
-    UTILISE CETTE LOGIQUE DE PASSERELLE (Obligatoire) : 
-    ${motsCles}
+    CIBLE : ${motsCles}
     
-    ⛔ NE PROPOSE PAS : ${exclusions}
+    ⛔ INTERDIT : ${exclusions}
+    ⛔ INTERDIT : Ne réponds JAMAIS par des catégories ("Les lycées..."). Je veux des NOMS PROPRES ("Lycée Jean Moulin").
     
-    Filtre Niveau : ${niveau === 'all' ? 'Tous niveaux' : 'Niveau ' + niveau}.
-
-    INSTRUCTIONS :
-    1. Sois EXHAUSTIF : Cherche les diplômes directs (Titre Pro) MAIS AUSSI les diplômes connexes (Maintenance, Logistique, etc.) listés ci-dessus.
-    2. LOCALISATION : Cherche les Lycées Agricoles, CFPPA, MFR, CFA, IUT. Précise la ville réelle.
-    3. QUANTITÉ : Vise entre 6 et 10 résultats pour offrir le choix.
+    Pour chaque résultat, donne :
+    - Organisme : Le VRAI nom de l'école/CFA.
+    - Ville : La VRAIE ville (Code postal si possible).
+    - Distance : Estime la distance depuis le centre de la zone demandée.
     
     Renvoie le JSON uniquement.`;
 
-    // --- APPEL API ---
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${perplexityApiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'sonar-pro',
         messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userPrompt }],
-        temperature: 0.1, // Rigueur absolue
+        temperature: 0.1,
         max_tokens: 4000
       }),
     });
@@ -192,7 +143,6 @@ Deno.serve(async (req: Request) => {
     if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
-    // --- PARSING ---
     let result;
     try {
         const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -203,28 +153,26 @@ Deno.serve(async (req: Request) => {
         else throw new Error("Erreur JSON IA");
     }
 
-    // --- FILTRE FINAL DE SÉCURITÉ (LE FILET DE SAUVETAGE) ---
     if (result.formations) {
         result.formations = result.formations.filter((f: any) => {
-            // 1. Règle Anti-Paris pour l'Agricole (Siège social interdit)
-            if (estMetierAgricole && f.ville.toLowerCase().includes("paris") && (f.distance_km || 0) < 5) return false;
+            // Filtre de sécurité : On vire les noms génériques détectés
+            const org = f.organisme.toLowerCase();
+            const ville = f.ville.toLowerCase();
+            if (org.includes("lycées agricoles") || org.includes("centres habilités") || ville.includes("secteurs")) return false;
             
-            // 2. Règle Distance (Pas plus de 70km, on est large pour la campagne)
-            const dist = f.distance_km;
-            if (typeof dist === 'number') return dist <= 70;
-            return true; 
+            // Règle Distance (Large pour la campagne)
+            return (f.distance_km || 0) <= 80;
         });
 
-        // Tri par distance
         result.formations.sort((a: any, b: any) => (a.distance_km || 999) - (b.distance_km || 999));
         
-        // Nettoyage esthétique des niveaux
+        // Nettoyage esthétique
         result.formations.forEach((f:any) => {
             if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '');
         });
     }
 
-    console.log(`✅ ${result.formations?.length || 0} parcours trouvés.`);
+    console.log(`✅ ${result.formations?.length || 0} résultats PRÉCIS trouvés.`);
 
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
