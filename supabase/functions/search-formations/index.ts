@@ -6,102 +6,113 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- 1. MATRICE D'EXPERTISE (DATA DIPLÔMES & RNCP) ---
-const METIERS_DATA: Record<string, { diplomes: string[], rncp_map: Record<string, string>, contexte: string }> = {
+// ==================================================================================
+// 1. LA BASE DE CONNAISSANCE STATIQUE (Le Cerveau Ocapiat)
+// ==================================================================================
+
+// Dictionnaire RNCP complet pour les 12 métiers (Plus besoin de DB)
+const RNCP_DB: Record<string, string> = {
+    // COMMERCIAL
+    "CCST": "RNCP35801", "CONSEIL ET COMMERCIALISATION": "RNCP35801",
+    "TECHNICO-COMMERCIAL": "RNCP38368", "NDRC": "RNCP38368", "NÉGOCIATION": "RNCP38368",
+    "TECHNIQUES DE COMMERCIALISATION": "RNCP35366", "BUT TC": "RNCP35366",
+    "COMMERCE INTERNATIONAL": "RNCP38372", "EXPORT": "RNCP38372",
+    // SILO & AGRI
+    "AGROÉQUIPEMENT": "RNCP38234", "AGENT DE SILO": "RNCP28779", "CONDUCTEUR DE SILO": "RNCP28779",
+    "GDEA": "RNCP38243", "MAINTENANCE DES MATÉRIELS": "RNCP37039", "CGEA": "RNCP31670",
+    "PRODUCTIONS VÉGÉTALES": "RNCP38241", "AGRONOMIE": "RNCP35850", "ACSE": "RNCP38240",
+    "RESPONSABLE DE SILO": "RNCP_BRANCHE", "STOCKAGE": "RNCP28779",
+    // LOGISTIQUE
+    "GTLA": "RNCP35364", "GESTION DES TRANSPORTS": "RNCP35364",
+    "QLIO": "RNCP35367", "TSMEL": "RNCP34360", "CHAIN LOGISTIQUE": "RNCP31112",
+    "AGENT MAGASINIER": "RNCP38413", "LOGISTIQUE": "RNCP38416", "PRÉPARATEUR DE COMMANDES": "RNCP38417",
+    "CACES": "Habilitation",
+    // MAINTENANCE & INDUS
+    "MAINTENANCE DES SYSTÈMES": "RNCP35323", "MSPC": "RNCP35475", "MEI": "RNCP24498",
+    "GIM": "RNCP35365", "ÉLECTROTECHNIQUE": "RNCP35349", "CRSA": "RNCP35342",
+    "PILOTE DE LIGNE": "RNCP35602", "PSPA": "RNCP35474", "CONDUCTEUR DE LIGNE": "RNCP_BRANCHE",
+    // QUALITÉ
+    "BIOQUALITÉ": "RNCP38235", "QIA": "RNCP38235", "BIOQUALIM": "RNCP36937",
+    "GÉNIE BIOLOGIQUE": "RNCP35364", "AGRÉEUR": "RNCP_BRANCHE",
+    // CONDUITE
+    "CONDUCTEUR ROUTIER": "RNCP35310", "TRANSPORT ROUTIER": "RNCP35293", "CONDUITE DE MACHINES": "RNCP31962"
+};
+
+// Matrice des 12 Métiers : Définition exacte des diplômes cibles
+const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> = {
     "silo": {
-        diplomes: ["Bac Pro Agroéquipement", "CQP Agent de silo", "CQP Conducteur de silo", "BTSA GDEA", "CAP Maintenance des matériels", "CS Responsable de silo", "Bac Pro CGEA"],
-        rncp_map: { "AGROÉQUIPEMENT": "RNCP38234", "AGENT DE SILO": "RNCP28779", "GDEA": "RNCP38243", "MAINTENANCE DES MATÉRIELS": "RNCP37039", "CGEA": "RNCP31670" },
-        contexte: "Cible : Lycées Agricoles, CFPPA, MFR. Évite les zones purement urbaines."
+        diplomes: ["Bac Pro Agroéquipement", "CQP Agent de silo", "BTSA GDEA", "CAP Maintenance des matériels", "Bac Pro CGEA"],
+        contexte: "Cherche : Lycées Agricoles, CFPPA, MFR."
     },
-    "maintenance": { 
-        diplomes: ["BTS Maintenance des Systèmes", "BUT Génie Industriel et Maintenance", "Bac Pro MSPC", "BTS Électrotechnique", "BTS CRSA", "Licence Pro Maintenance"],
-        rncp_map: { "MAINTENANCE DES SYSTÈMES": "RNCP35323", "GIM": "RNCP35365", "MSPC": "RNCP35475", "ÉLECTROTECHNIQUE": "RNCP35349", "CRSA": "RNCP35342" },
-        contexte: "Cible : Lycées Professionnels Industriels, CFAI, IUT."
+    "maintenance": { // Resp services techniques
+        diplomes: ["BTS Maintenance des Systèmes (MS)", "BUT Génie Industriel et Maintenance (GIM)", "Bac Pro MSPC", "BTS Électrotechnique"],
+        contexte: "Cherche : Lycées Pros Industriels, CFAI, IUT."
     },
-    "logistique": { 
-        diplomes: ["BUT QLIO", "TSMEL", "BTS GTLA", "Master Logistique", "Responsable de la chaîne logistique"],
-        rncp_map: { "QLIO": "RNCP35367", "TSMEL": "RNCP34360", "GTLA": "RNCP35311", "CHAIN LOGISTIQUE": "RNCP31112" },
-        contexte: "Cible : IUT, Écoles de Transport (Aftral/Promotrans), Universités."
+    "logistique": { // Resp logistique
+        diplomes: ["BUT QLIO", "TSMEL", "BTS GTLA", "Master Management de la chaîne logistique", "Titre Responsable Logistique"],
+        contexte: "Cherche : IUT, Écoles de Transport (Aftral/Promotrans), Universités."
     },
     "magasinier": { 
-        diplomes: ["Titre Pro Agent Magasinier", "Bac Pro Logistique", "CACES R489", "Titre Pro Préparateur de commandes", "CAP Opérateur Logistique"],
-        rncp_map: { "AGENT MAGASINIER": "RNCP38413", "LOGISTIQUE": "RNCP38416", "PRÉPARATEUR DE COMMANDES": "RNCP38417", "OPÉRATEUR LOGISTIQUE": "RNCP38415" },
-        contexte: "Cible : AFPA, Aftral, Promotrans, Lycées Pros, GRETA."
+        diplomes: ["Titre Pro Agent Magasinier", "Bac Pro Logistique", "CACES R489", "Titre Pro Préparateur de commandes"],
+        contexte: "Cherche : AFPA, Aftral, Promotrans, Lycées Pros, GRETA."
     },
     "technico": { 
-        diplomes: ["BTS CCST", "BTSA Technico-commercial", "BTS NDRC", "BUT Techniques de Commercialisation", "Licence Pro Technico-Commercial"],
-        rncp_map: { "CCST": "RNCP35801", "TECHNICO-COMMERCIAL": "RNCP38368", "NDRC": "RNCP38368", "TECHNIQUES DE COMMERCIALISATION": "RNCP35366" },
-        contexte: "Cible : Lycées Agricoles (Obligatoire pour BTSA), Lycées Publics, CFA CCIP."
+        diplomes: ["BTS CCST (ex-TC)", "BTSA Technico-commercial", "BTS NDRC", "BUT Techniques de Commercialisation"],
+        contexte: "Cherche : Lycées Agricoles (Obligatoire pour BTSA), Lycées Publics, CFA CCIP."
     },
     "export": { 
-        diplomes: ["BTS Commerce International", "BUT Techniques de Commercialisation", "Licence Pro Commerce International", "Master Commerce International"],
-        rncp_map: { "COMMERCE INTERNATIONAL": "RNCP38372", "TECHNIQUES DE COMMERCIALISATION": "RNCP35366" },
-        contexte: "Cible : Lycées avec section internationale, IUT, Écoles de Commerce."
+        diplomes: ["BTS Commerce International", "BUT Techniques de Commercialisation (Parcours International)", "Master Commerce International"],
+        contexte: "Cherche : Lycées avec section internationale, IUT, Écoles de Commerce."
     },
     "qualite": { 
-        diplomes: ["BTSA Bioqualité", "BUT Génie Biologique", "BTS QIABI", "Licence Pro Qualité Agroalimentaire", "Titre Pro Technicien Qualité"],
-        rncp_map: { "BIOQUALITÉ": "RNCP38235", "GÉNIE BIOLOGIQUE": "RNCP35364", "QIABI": "RNCP38249", "TECHNICIEN QUALITÉ": "RNCP35860" },
-        contexte: "Cible : ENIL (Écoles laitières), IUT, Lycées Agricoles."
+        diplomes: ["BTSA Bioqualité (Bioqualim)", "BUT Génie Biologique", "Licence Pro Qualité Agroalimentaire"],
+        contexte: "Cherche : ENIL, IUT, Lycées Agricoles."
     },
     "agreeur": { 
-        diplomes: ["CQP Agréeur", "Formation Classement des grains", "CS Stockage de céréales", "BTSA Agronomie Productions Végétales"],
-        rncp_map: { "AGRÉEUR": "RNCP_BRANCHE", "STOCKAGE": "RNCP28779", "PRODUCTIONS VÉGÉTALES": "RNCP38241" },
-        contexte: "Cible : CFPPA Céréaliers, Organismes de branche."
+        diplomes: ["CQP Agréeur", "Formation Classement des grains", "CS Stockage de céréales", "BTSA Agronomie"],
+        contexte: "Cherche : CFPPA Céréaliers, Organismes de la branche (Vérifie les adresses physiques)."
     },
     "ligne": { 
         diplomes: ["Pilote de ligne de production", "Bac Pro PSPA", "CQP Conducteur de ligne", "BTS Pilotage de procédés"],
-        rncp_map: { "PILOTE DE LIGNE": "RNCP35602", "PSPA": "RNCP35474", "CONDUCTEUR DE LIGNE": "RNCP_BRANCHE", "PILOTAGE DE PROCÉDÉS": "RNCP35327" },
-        contexte: "Cible : CFAI, Lycées Pros Industriels, IMT."
+        contexte: "Cherche : CFAI, Lycées Pros Industriels."
     },
     "culture": { 
-        diplomes: ["BTSA Agronomie Productions Végétales", "BTSA ACSE", "Licence Pro Agronomie", "Ingénieur Agronome", "BPREA"],
-        rncp_map: { "PRODUCTIONS VÉGÉTALES": "RNCP38241", "ACSE": "RNCP38240", "AGRONOMIE": "RNCP35850" },
-        contexte: "Cible : Lycées Agricoles, CFAA, Écoles d'Ingénieurs Agri."
+        diplomes: ["BTSA Agronomie Productions Végétales (APV)", "BTSA ACSE", "Licence Pro Agronomie", "Ingénieur Agri"],
+        contexte: "Cherche : Lycées Agricoles, CFAA, Écoles d'Ingénieurs."
     },
     "chauffeur": { 
-        diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur du transport routier", "CS Conduite de machines agricoles", "BPA Travaux de la conduite"],
-        rncp_map: { "CONDUCTEUR ROUTIER": "RNCP35310", "TRANSPORT ROUTIER": "RNCP35293", "CONDUITE DE MACHINES": "RNCP31962", "BPA": "RNCP14030" },
-        contexte: "Cible : Aftral, Promotrans, Lycées Agricoles (pour le machinisme)."
+        diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur du transport routier", "CS Conduite de machines agricoles"],
+        contexte: "Cherche : Aftral, Promotrans, Lycées Agricoles (Machinisme)."
     },
     "responsable_silo": { 
-        diplomes: ["CS Responsable de silo", "Licence Pro Management des organisations agricoles", "BTSA GDEA", "BTSA ACSE"],
-        rncp_map: { "RESPONSABLE DE SILO": "RNCP_BRANCHE", "GDEA": "RNCP38243", "ACSE": "RNCP38240" },
-        contexte: "Cible : CFPPA, Écoles d'ingénieurs (formation continue)."
-    },
-    "fallback": {
-        diplomes: ["Formations diplômantes du secteur agricole, agroalimentaire et industriel"],
-        rncp_map: {},
-        contexte: "Cherche les établissements reconnus (Lycées, CFA, IUT)."
+        diplomes: ["CS Responsable de silo", "Licence Pro Management des organisations agricoles", "BTSA GDEA"],
+        contexte: "Cherche : CFPPA, Écoles d'ingénieurs (formation continue)."
     }
 };
 
-const SYSTEM_PROMPT = `Tu es un MOTEUR DE RECHERCHE D'ÉTABLISSEMENTS SCOLAIRES.
-Mission : Scanner le web pour trouver TOUS les établissements réels dispensant les formations demandées.
+// ==================================================================================
+// 2. FONCTIONS UTILITAIRES (L'intelligence embarquée)
+// ==================================================================================
 
-RÈGLES D'OR :
-1. ZÉRO INVENTION : Si l'école n'existe pas, tu ne l'inventes pas.
-2. ADRESSE RÉELLE : Ville précise obligatoire. Pas de "Secteur", "Zone".
-3. VOLUME MAXIMAL : Vise 15 résultats. Trouve tout ce qui existe (Public, Privé, CFA, MFR).
-4. NOMMAGE PROPRE : Donne le nom officiel (ex: "Lycée Agricole Bougainville").
+// Routeur Sémantique : Transforme le texte utilisateur en clé système (1 parmi 12)
+function detecterMetier(input: string): string {
+    const m = input.toLowerCase();
+    if (m.match(/silo|grain|stockage/)) return m.includes("responsable") ? "responsable_silo" : "silo";
+    if (m.match(/culture|végétal|céréale|agronomie|plante|maraichage/)) return "culture";
+    if (m.match(/chauffeur|conducteur|tracteur|routier|transport|engin/)) return m.includes("ligne") ? "ligne" : "chauffeur";
+    if (m.match(/maintenance|technique|élec|méca|automatisme/)) return "maintenance";
+    if (m.match(/logistique|supply/)) return m.includes("responsable") ? "logistique" : "magasinier";
+    if (m.match(/magasinier|cariste|chariot|entrepot/)) return "magasinier";
+    if (m.match(/commercial|vente|négoce|business|technico/)) return m.match(/export|inter/) ? "export" : "technico";
+    if (m.match(/qualité|contrôle|qhse/)) return "qualite";
+    if (m.match(/agréeur|agréage/)) return "agreeur";
+    if (m.match(/ligne|production|pilote/)) return "ligne";
+    return "technico"; // Fallback safe
+}
 
-FORMAT JSON STRICT :
-{
-  "metier_normalise": "string",
-  "ville_reference": "string",
-  "formations": [
-    {
-      "intitule": "Intitulé exact",
-      "organisme": "Nom ÉTABLISSEMENT",
-      "rncp": "Code ou null",
-      "categorie": "Diplôme" | "Certification" | "Habilitation",
-      "niveau": "3" | "4" | "5" | "6" | "N/A",
-      "ville": "Commune exacte",
-      "distance_km": number,
-      "site_web": "URL ou null",
-      "modalite": "Présentiel" | "Apprentissage"
-    }
-  ]
-}`;
+// ==================================================================================
+// 3. LE SERVEUR
+// ==================================================================================
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -113,105 +124,64 @@ Deno.serve(async (req: Request) => {
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    // --- 2. DÉTECTION DU MÉTIER (LOGIQUE ÉLARGIE "FUZZY MATCHING") ---
-    const m = metier.toLowerCase();
-    let metierKey = "fallback"; 
+    // 1. DÉTECTION INTELLIGENTE
+    const metierKey = detecterMetier(metier);
+    const config = METIERS_CONFIG[metierKey];
+    console.log(`🧠 SYSTÈME EXPERT: Entrée="${metier}" -> Clé="${metierKey}"`);
 
-    // C'est ici que j'ai corrigé : On cherche des mots-clés larges, pas juste le titre exact.
-    
-    // FAMILLE SILO
-    if (m.match(/silo|grain|stockage|céréalier/)) {
-        if (m.includes("responsable")) metierKey = "responsable_silo";
-        else metierKey = "silo";
-    }
-    // FAMILLE AGRONOMIE / CULTURES (Correction pour "Productions végétales")
-    else if (m.match(/culture|végétal|céréale|agronomie|plante|maraichage|vigne|champs/)) {
-        metierKey = "culture";
-    }
-    // FAMILLE CONDUITE
-    else if (m.match(/chauffeur|conducteur|tracteur|routier|transport|engin/)) {
-        if (m.includes("ligne")) metierKey = "ligne";
-        else metierKey = "chauffeur";
-    }
-    // FAMILLE MAINTENANCE
-    else if (m.match(/maintenance|technique|élec|méca|automatisme|industriel/)) {
-        metierKey = "maintenance";
-    }
-    // FAMILLE LOGISTIQUE
-    else if (m.match(/logistique|supply/)) {
-        if (m.includes("responsable")) metierKey = "logistique";
-        else metierKey = "magasinier";
-    }
-    // FAMILLE MAGASINIER (Si pas capté par logistique)
-    else if (m.match(/magasinier|cariste|chariot|entrepot|préparateur/)) {
-        metierKey = "magasinier";
-    }
-    // FAMILLE COMMERCE
-    else if (m.match(/commercial|vente|négoce|business/)) {
-        if (m.includes("export") || m.includes("international")) metierKey = "export";
-        else metierKey = "technico"; // Par défaut si commercial
-    }
-    else if (m.includes("technico")) {
-        metierKey = "technico";
-    }
-    // FAMILLE QUALITÉ
-    else if (m.match(/qualité|contrôle|qhse|laboratoire/)) {
-        metierKey = "qualite";
-    }
-    else if (m.match(/agréeur|agréage|classification/)) {
-        metierKey = "agreeur";
-    }
-    // FAMILLE LIGNE (Production)
-    else if (m.match(/ligne|production|pilote|procédé/)) {
-        metierKey = "ligne";
-    }
-
-    console.log(`🧠 LOGIQUE DÉTECTÉE : "${metier}" -> Clé : "${metierKey}"`);
-
-    const expertise = METIERS_DATA[metierKey];
-
-    // --- 3. LOGIQUE GÉOGRAPHIQUE ÉLARGIE ---
-    let rayon = "50km";
-    let zoneRecherche = `${ville} et alentours (${rayon})`;
-
-    // Si le métier est agricole/rare et qu'on est en grande ville, on force l'élargissement
+    // 2. STRATÉGIE GÉOGRAPHIQUE
+    // Si métier Agri + Grande Ville => On force la périphérie
+    let zoneRecherche = `${ville} (et environs 50km)`;
     const isAgri = ["silo", "culture", "agreeur", "chauffeur", "responsable_silo"].includes(metierKey);
-    if (isAgri && ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|massy|fresnes/)) {
-         zoneRecherche = "Grande périphérie rurale (jusqu'à 60km du centre, ex: 77, 78, 91, 95)";
+    if (isAgri && ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|massy|fresnes|montpellier/)) {
+         zoneRecherche = "Périphérie rurale et départements limitrophes (max 60km)";
     }
 
-    // Si on est en fallback, on cherche large
-    if (metierKey === "fallback") {
-         zoneRecherche = `${ville} (recherche large établissements formation)`;
-    }
+    // 3. CONSTRUCTION DU PROMPT
+    const systemPrompt = `Tu es un MOTEUR DE RECHERCHE D'ÉTABLISSEMENTS SCOLAIRES.
+    Mission : Trouver des ÉTABLISSEMENTS RÉELS (Nom + Ville) pour les diplômes demandés.
+    
+    RÈGLES ABSOLUES :
+    1. PRÉCISION : Interdiction des généralités ("Les lycées"). Donne le NOM EXACT.
+    2. VÉRITÉ : Si tu ne trouves pas d'école pour un diplôme précis, ne l'invente pas.
+    3. VOLUME : Cherche large (Public, Privé, CFA, MFR). Vise 10-15 résultats.
+    
+    JSON STRICT :
+    {
+      "formations": [
+        {
+          "intitule": "Intitulé exact",
+          "organisme": "Nom ÉTABLISSEMENT",
+          "rncp": "Code ou null",
+          "niveau": "3" | "4" | "5" | "6" | "N/A",
+          "ville": "Commune exacte",
+          "distance_km": number,
+          "site_web": "URL ou null",
+          "modalite": "Présentiel" | "Apprentissage"
+        }
+      ]
+    }`;
 
-    const userPrompt = `Trouve TOUS les établissements pour ces diplômes : "${expertise.diplomes.join(", ")}" dans la zone "${zoneRecherche}".
-    
-    CONTEXTE : ${expertise.contexte}
-    
-    INSTRUCTIONS CRITIQUES :
-    1. EXHAUSTIVITÉ : Liste tout ce que tu trouves (Lycées, CFA, MFR). Vise 15 résultats.
-    2. PRÉCISION : NOM + VILLE exacts obligatoires.
-    3. PAS D'INVENTION.
-    
-    Renvoie le JSON uniquement.`;
+    const userPrompt = `Trouve les établissements pour : "${config.diplomes.join(", ")}" dans la zone "${zoneRecherche}".
+    CONTEXTE : ${config.contexte}.
+    Renvoie le JSON.`;
 
-    // --- 4. APPEL PERPLEXITY ---
+    // 4. APPEL IA
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${perplexityApiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'sonar-pro',
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: userPrompt }],
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
         temperature: 0.1,
         max_tokens: 4000
       }),
     });
 
-    if (!perplexityResponse.ok) throw new Error(`Erreur API Perplexity: ${perplexityResponse.status}`);
+    if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
-    // --- 5. PARSING ---
+    // 5. PARSING
     let result;
     try {
         const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -222,7 +192,7 @@ Deno.serve(async (req: Request) => {
         else throw new Error("Erreur JSON IA");
     }
 
-    // --- 6. LE FILTRE FINAL ---
+    // 6. LE FILTRE SYSTÉMIQUE (Nettoyage + Enrichissement)
     if (result.formations) {
         
         const niveauCible = niveau === 'all' ? null : niveau.toString();
@@ -232,31 +202,33 @@ Deno.serve(async (req: Request) => {
             if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '').trim();
             if (niveauCible && f.niveau !== 'N/A' && f.niveau !== niveauCible) return false;
 
-            // B. Anti-Flou Strict
+            // B. Anti-Flou (Noms génériques)
             const org = f.organisme.toLowerCase();
             const villeF = f.ville.toLowerCase();
-            const termesInterdits = ["lycées", "réseau", "structures", "organismes", "plusieurs", "divers", "habilités"];
-            const villesInterdites = ["secteur", "zone", "départements", "alentours", "proximité"];
+            const badTerms = ["lycées", "réseau", "structures", "organismes", "divers", "habilités"];
+            const badCities = ["secteur", "zone", "départements", "alentours", "proximité"];
             
-            if (termesInterdits.some(t => org.includes(t) && !org.startsWith("lycée") && !org.startsWith("cfa") && !org.startsWith("mfr") && !org.startsWith("cfppa"))) return false;
-            if (villesInterdites.some(v => villeF.includes(v))) return false;
+            if (badTerms.some(t => org.includes(t) && !org.startsWith("lycée") && !org.startsWith("cfa") && !org.startsWith("mfr") && !org.startsWith("cfppa"))) return false;
+            if (badCities.some(v => villeF.includes(v))) return false;
 
-            // C. Distance
-            return (f.distance_km || 0) <= 80;
+            // C. DISTANCE STRICTE (60km MAX)
+            // C'est ça qui élimine Perpignan quand on cherche à Montpellier
+            return (f.distance_km || 0) <= 60;
         });
 
-        // D. ENRICHISSEMENT RNCP + CATÉGORIE
+        // D. ENRICHISSEMENT AUTOMATIQUE (RNCP + CAT)
         result.formations.forEach((f: any) => {
-            const intitule = f.intitule.toUpperCase();
+            const intituleUpper = f.intitule.toUpperCase();
+            
             // Catégorie
-            if (intitule.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR/)) f.categorie = "Diplôme";
-            else if (intitule.match(/CQP|CS /)) f.categorie = "Certification";
+            if (intituleUpper.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR/)) f.categorie = "Diplôme";
+            else if (intituleUpper.match(/CQP|CS /)) f.categorie = "Certification";
             else f.categorie = "Habilitation";
 
-            // RNCP
+            // RNCP Automatique (Le Patch)
             if (!f.rncp || f.rncp.length < 5 || f.rncp === "Non renseigné") {
-                for (const [key, code] of Object.entries(expertise.rncp_map)) {
-                    if (intitule.includes(key)) {
+                for (const [key, code] of Object.entries(RNCP_DB)) {
+                    if (intituleUpper.includes(key)) {
                         f.rncp = code;
                         break;
                     }
@@ -264,15 +236,20 @@ Deno.serve(async (req: Request) => {
             }
         });
 
+        // Tri
         result.formations.sort((a: any, b: any) => (a.distance_km || 999) - (b.distance_km || 999));
     }
 
-    if (!result.metier_normalise) result.metier_normalise = metier;
-    if (!result.ville_reference) result.ville_reference = ville;
+    // Reconstruction de la réponse pour le Front
+    const finalResponse = {
+        metier_normalise: metier,
+        ville_reference: ville,
+        formations: result.formations || []
+    };
 
-    console.log(`✅ ${result.formations?.length || 0} résultats renvoyés.`);
+    console.log(`✅ SUCCÈS: ${finalResponse.formations.length} résultats renvoyés.`);
 
-    return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(finalResponse), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (error: any) {
     console.error('❌ Error:', error);
