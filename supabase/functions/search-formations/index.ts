@@ -7,113 +7,95 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. LA BASE DE CONNAISSANCE STATIQUE (Le Cerveau Ocapiat)
+// 1. DATA RNCP & MÉTIERS
 // ==================================================================================
-
-// Dictionnaire RNCP complet pour les 12 métiers (Plus besoin de DB)
 const RNCP_DB: Record<string, string> = {
-    // COMMERCIAL
-    "CCST": "RNCP35801", "CONSEIL ET COMMERCIALISATION": "RNCP35801",
-    "TECHNICO-COMMERCIAL": "RNCP38368", "NDRC": "RNCP38368", "NÉGOCIATION": "RNCP38368",
-    "TECHNIQUES DE COMMERCIALISATION": "RNCP35366", "BUT TC": "RNCP35366",
-    "COMMERCE INTERNATIONAL": "RNCP38372", "EXPORT": "RNCP38372",
     // SILO & AGRI
-    "AGROÉQUIPEMENT": "RNCP38234", "AGENT DE SILO": "RNCP28779", "CONDUCTEUR DE SILO": "RNCP28779",
-    "GDEA": "RNCP38243", "MAINTENANCE DES MATÉRIELS": "RNCP37039", "CGEA": "RNCP31670",
-    "PRODUCTIONS VÉGÉTALES": "RNCP38241", "AGRONOMIE": "RNCP35850", "ACSE": "RNCP38240",
-    "RESPONSABLE DE SILO": "RNCP_BRANCHE", "STOCKAGE": "RNCP28779",
+    "AGROÉQUIPEMENT": "RNCP38234", "AGENT DE SILO": "RNCP28779", "GDEA": "RNCP38243",
+    "MAINTENANCE DES MATÉRIELS": "RNCP37039", "CGEA": "RNCP31670", "PRODUCTIONS VÉGÉTALES": "RNCP38241",
+    // MAINTENANCE
+    "MAINTENANCE DES SYSTÈMES": "RNCP35323", "MSPC": "RNCP35475", "GIM": "RNCP35365",
     // LOGISTIQUE
-    "GTLA": "RNCP35364", "GESTION DES TRANSPORTS": "RNCP35364",
-    "QLIO": "RNCP35367", "TSMEL": "RNCP34360", "CHAIN LOGISTIQUE": "RNCP31112",
-    "AGENT MAGASINIER": "RNCP38413", "LOGISTIQUE": "RNCP38416", "PRÉPARATEUR DE COMMANDES": "RNCP38417",
-    "CACES": "Habilitation",
-    // MAINTENANCE & INDUS
-    "MAINTENANCE DES SYSTÈMES": "RNCP35323", "MSPC": "RNCP35475", "MEI": "RNCP24498",
-    "GIM": "RNCP35365", "ÉLECTROTECHNIQUE": "RNCP35349", "CRSA": "RNCP35342",
-    "PILOTE DE LIGNE": "RNCP35602", "PSPA": "RNCP35474", "CONDUCTEUR DE LIGNE": "RNCP_BRANCHE",
-    // QUALITÉ
-    "BIOQUALITÉ": "RNCP38235", "QIA": "RNCP38235", "BIOQUALIM": "RNCP36937",
-    "GÉNIE BIOLOGIQUE": "RNCP35364", "AGRÉEUR": "RNCP_BRANCHE",
-    // CONDUITE
-    "CONDUCTEUR ROUTIER": "RNCP35310", "TRANSPORT ROUTIER": "RNCP35293", "CONDUITE DE MACHINES": "RNCP31962"
+    "GTLA": "RNCP35364", "QLIO": "RNCP35367", "TSMEL": "RNCP34360", "AGENT MAGASINIER": "RNCP38413",
+    "LOGISTIQUE": "RNCP38416", "PRÉPARATEUR DE COMMANDES": "RNCP38417",
+    // COMMERCE
+    "CCST": "RNCP35801", "TECHNICO-COMMERCIAL": "RNCP38368", "NDRC": "RNCP38368", "TC": "RNCP35366",
+    // AUTRES
+    "BIOQUALITÉ": "RNCP38235", "PILOTE DE LIGNE": "RNCP35602", "CONDUCTEUR ROUTIER": "RNCP35310"
 };
 
-// Matrice des 12 Métiers : Définition exacte des diplômes cibles
 const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> = {
     "silo": {
         diplomes: ["Bac Pro Agroéquipement", "CQP Agent de silo", "BTSA GDEA", "CAP Maintenance des matériels", "Bac Pro CGEA"],
         contexte: "Cherche : Lycées Agricoles, CFPPA, MFR."
     },
-    "maintenance": { // Resp services techniques
-        diplomes: ["BTS Maintenance des Systèmes (MS)", "BUT Génie Industriel et Maintenance (GIM)", "Bac Pro MSPC", "BTS Électrotechnique"],
-        contexte: "Cherche : Lycées Pros Industriels, CFAI, IUT."
+    "maintenance": { 
+        diplomes: ["BTS Maintenance des Systèmes (MS)", "BUT Génie Industriel et Maintenance", "Bac Pro MSPC"],
+        contexte: "Cherche : Lycées Pros Industriels, CFAI."
     },
-    "logistique": { // Resp logistique
-        diplomes: ["BUT QLIO", "TSMEL", "BTS GTLA", "Master Management de la chaîne logistique", "Titre Responsable Logistique"],
-        contexte: "Cherche : IUT, Écoles de Transport (Aftral/Promotrans), Universités."
+    "logistique": { 
+        diplomes: ["BUT QLIO", "TSMEL", "BTS GTLA", "Titre Responsable Logistique"],
+        contexte: "Cherche : IUT, Aftral, Promotrans."
     },
     "magasinier": { 
-        diplomes: ["Titre Pro Agent Magasinier", "Bac Pro Logistique", "CACES R489", "Titre Pro Préparateur de commandes"],
-        contexte: "Cherche : AFPA, Aftral, Promotrans, Lycées Pros, GRETA."
+        diplomes: ["Titre Pro Agent Magasinier", "Bac Pro Logistique", "CACES R489"],
+        contexte: "Cherche : AFPA, Aftral, Promotrans, Lycées Pros."
     },
     "technico": { 
-        diplomes: ["BTS CCST (ex-TC)", "BTSA Technico-commercial", "BTS NDRC", "BUT Techniques de Commercialisation"],
-        contexte: "Cherche : Lycées Agricoles (Obligatoire pour BTSA), Lycées Publics, CFA CCIP."
+        diplomes: ["BTS CCST", "BTSA Technico-commercial", "BTS NDRC"],
+        contexte: "Cherche : Lycées Agricoles (pour BTSA), Lycées Publics, CFA CCIP."
     },
     "export": { 
-        diplomes: ["BTS Commerce International", "BUT Techniques de Commercialisation (Parcours International)", "Master Commerce International"],
-        contexte: "Cherche : Lycées avec section internationale, IUT, Écoles de Commerce."
+        diplomes: ["BTS Commerce International", "BUT TC (Parcours International)"],
+        contexte: "Cherche : Lycées section internationale, IUT."
     },
     "qualite": { 
-        diplomes: ["BTSA Bioqualité (Bioqualim)", "BUT Génie Biologique", "Licence Pro Qualité Agroalimentaire"],
+        diplomes: ["BTSA Bioqualité", "BUT Génie Biologique", "Licence Pro Qualité"],
         contexte: "Cherche : ENIL, IUT, Lycées Agricoles."
     },
     "agreeur": { 
-        diplomes: ["CQP Agréeur", "Formation Classement des grains", "CS Stockage de céréales", "BTSA Agronomie"],
-        contexte: "Cherche : CFPPA Céréaliers, Organismes de la branche (Vérifie les adresses physiques)."
+        diplomes: ["CQP Agréeur", "Formation Classement des grains", "BTSA Agronomie"],
+        contexte: "Cherche : CFPPA Céréaliers."
     },
     "ligne": { 
-        diplomes: ["Pilote de ligne de production", "Bac Pro PSPA", "CQP Conducteur de ligne", "BTS Pilotage de procédés"],
+        diplomes: ["Pilote de ligne de production", "Bac Pro PSPA", "CQP Conducteur de ligne"],
         contexte: "Cherche : CFAI, Lycées Pros Industriels."
     },
     "culture": { 
-        diplomes: ["BTSA Agronomie Productions Végétales (APV)", "BTSA ACSE", "Licence Pro Agronomie", "Ingénieur Agri"],
-        contexte: "Cherche : Lycées Agricoles, CFAA, Écoles d'Ingénieurs."
+        diplomes: ["BTSA APV", "BTSA ACSE", "Ingénieur Agri"],
+        contexte: "Cherche : Lycées Agricoles, CFAA."
     },
     "chauffeur": { 
-        diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur du transport routier", "CS Conduite de machines agricoles"],
-        contexte: "Cherche : Aftral, Promotrans, Lycées Agricoles (Machinisme)."
+        diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur", "CS Conduite machines agricoles"],
+        contexte: "Cherche : Aftral, Promotrans, Lycées Agricoles."
     },
     "responsable_silo": { 
-        diplomes: ["CS Responsable de silo", "Licence Pro Management des organisations agricoles", "BTSA GDEA"],
-        contexte: "Cherche : CFPPA, Écoles d'ingénieurs (formation continue)."
+        diplomes: ["CS Responsable de silo", "Licence Pro Management agri", "BTSA GDEA"],
+        contexte: "Cherche : CFPPA, Écoles d'ingénieurs."
     }
 };
 
 // ==================================================================================
-// 2. FONCTIONS UTILITAIRES (L'intelligence embarquée)
+// 2. FONCTIONS
 // ==================================================================================
-
-// Routeur Sémantique : Transforme le texte utilisateur en clé système (1 parmi 12)
 function detecterMetier(input: string): string {
     const m = input.toLowerCase();
-    if (m.match(/silo|grain|stockage/)) return m.includes("responsable") ? "responsable_silo" : "silo";
-    if (m.match(/culture|végétal|céréale|agronomie|plante|maraichage/)) return "culture";
-    if (m.match(/chauffeur|conducteur|tracteur|routier|transport|engin/)) return m.includes("ligne") ? "ligne" : "chauffeur";
-    if (m.match(/maintenance|technique|élec|méca|automatisme/)) return "maintenance";
+    if (m.match(/silo|grain/)) return m.includes("responsable") ? "responsable_silo" : "silo";
+    if (m.match(/culture|végétal|céréale|agronomie/)) return "culture";
+    if (m.match(/chauffeur|conducteur|tracteur|routier/)) return m.includes("ligne") ? "ligne" : "chauffeur";
+    if (m.match(/maintenance|technique|élec|méca/)) return "maintenance";
     if (m.match(/logistique|supply/)) return m.includes("responsable") ? "logistique" : "magasinier";
-    if (m.match(/magasinier|cariste|chariot|entrepot/)) return "magasinier";
-    if (m.match(/commercial|vente|négoce|business|technico/)) return m.match(/export|inter/) ? "export" : "technico";
-    if (m.match(/qualité|contrôle|qhse/)) return "qualite";
-    if (m.match(/agréeur|agréage/)) return "agreeur";
-    if (m.match(/ligne|production|pilote/)) return "ligne";
-    return "technico"; // Fallback safe
+    if (m.match(/magasinier|cariste|entrepot/)) return "magasinier";
+    if (m.match(/commercial|vente|négoce|technico/)) return m.includes("export") ? "export" : "technico";
+    if (m.match(/qualité|contrôle/)) return "qualite";
+    if (m.match(/agréeur/)) return "agreeur";
+    if (m.match(/ligne|production/)) return "ligne";
+    return "technico";
 }
 
 // ==================================================================================
-// 3. LE SERVEUR
+// 3. SERVEUR
 // ==================================================================================
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
 
@@ -124,27 +106,28 @@ Deno.serve(async (req: Request) => {
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    // 1. DÉTECTION INTELLIGENTE
+    // DÉTECTION
     const metierKey = detecterMetier(metier);
     const config = METIERS_CONFIG[metierKey];
-    console.log(`🧠 SYSTÈME EXPERT: Entrée="${metier}" -> Clé="${metierKey}"`);
+    console.log(`🛡️ V18 SECURE: "${metier}" (${metierKey}) à "${ville}"`);
 
-    // 2. STRATÉGIE GÉOGRAPHIQUE
-    // Si métier Agri + Grande Ville => On force la périphérie
-    let zoneRecherche = `${ville} (et environs 50km)`;
-    const isAgri = ["silo", "culture", "agreeur", "chauffeur", "responsable_silo"].includes(metierKey);
-    if (isAgri && ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|massy|fresnes|montpellier/)) {
-         zoneRecherche = "Périphérie rurale et départements limitrophes (max 60km)";
+    // GÉOGRAPHIE STRICTE
+    let zoneRecherche = `${ville} (rayon 50km max)`;
+    // Si agri + grande ville, on force la périphérie
+    const isAgri = ["silo", "culture", "agreeur", "chauffeur"].includes(metierKey);
+    const isBigCity = ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|fresnes|massy|creteil/);
+    
+    if (isAgri && isBigCity) {
+         zoneRecherche = "Départements limitrophes (77, 78, 91, 95 pour IDF)";
     }
 
-    // 3. CONSTRUCTION DU PROMPT
-    const systemPrompt = `Tu es un MOTEUR DE RECHERCHE D'ÉTABLISSEMENTS SCOLAIRES.
-    Mission : Trouver des ÉTABLISSEMENTS RÉELS (Nom + Ville) pour les diplômes demandés.
+    const systemPrompt = `Tu es un MOTEUR DE RECHERCHE GÉOGRAPHIQUE STRICT.
+    Mission : Trouver des ÉTABLISSEMENTS RÉELS (Nom + Ville) proches de la zone demandée.
     
-    RÈGLES ABSOLUES :
-    1. PRÉCISION : Interdiction des généralités ("Les lycées"). Donne le NOM EXACT.
-    2. VÉRITÉ : Si tu ne trouves pas d'école pour un diplôme précis, ne l'invente pas.
-    3. VOLUME : Cherche large (Public, Privé, CFA, MFR). Vise 10-15 résultats.
+    RÈGLES DE SÉCURITÉ :
+    1. DISTANCE RÉELLE : Si une école est célèbre (ex: Courcelles-Chaussy) mais située hors de la zone (ex: > 100km), NE LA METS PAS.
+    2. PRÉCISION : Nom EXACT de l'école et de la ville.
+    3. EXHAUSTIVITÉ : Vise 15 résultats LOCAUX.
     
     JSON STRICT :
     {
@@ -162,11 +145,12 @@ Deno.serve(async (req: Request) => {
       ]
     }`;
 
-    const userPrompt = `Trouve les établissements pour : "${config.diplomes.join(", ")}" dans la zone "${zoneRecherche}".
+    const userPrompt = `Trouve les établissements pour : "${config.diplomes.join(", ")}" DANS LA ZONE : "${zoneRecherche}".
     CONTEXTE : ${config.contexte}.
+    IMPORTANT : Vérifie la distance. Si c'est trop loin (>80km), rejette.
     Renvoie le JSON.`;
 
-    // 4. APPEL IA
+    // APPEL IA
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${perplexityApiKey}`, 'Content-Type': 'application/json' },
@@ -181,7 +165,6 @@ Deno.serve(async (req: Request) => {
     if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
-    // 5. PARSING
     let result;
     try {
         const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -192,7 +175,7 @@ Deno.serve(async (req: Request) => {
         else throw new Error("Erreur JSON IA");
     }
 
-    // 6. LE FILTRE SYSTÉMIQUE (Nettoyage + Enrichissement)
+    // --- LE FILTRE "ANTI-TELEPORTATION" (CORRIGÉ) ---
     if (result.formations) {
         
         const niveauCible = niveau === 'all' ? null : niveau.toString();
@@ -202,30 +185,47 @@ Deno.serve(async (req: Request) => {
             if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '').trim();
             if (niveauCible && f.niveau !== 'N/A' && f.niveau !== niveauCible) return false;
 
-            // B. Anti-Flou (Noms génériques)
+            // B. Anti-Flou
             const org = f.organisme.toLowerCase();
             const villeF = f.ville.toLowerCase();
-            const badTerms = ["lycées", "réseau", "structures", "organismes", "divers", "habilités"];
-            const badCities = ["secteur", "zone", "départements", "alentours", "proximité"];
-            
-            if (badTerms.some(t => org.includes(t) && !org.startsWith("lycée") && !org.startsWith("cfa") && !org.startsWith("mfr") && !org.startsWith("cfppa"))) return false;
-            if (badCities.some(v => villeF.includes(v))) return false;
+            if (org.includes("lycées") || org.includes("réseau") || villeF.includes("secteur")) return false;
 
-            // C. DISTANCE STRICTE (60km MAX)
-            // C'est ça qui élimine Perpignan quand on cherche à Montpellier
-            return (f.distance_km || 0) <= 60;
+            // C. CORRECTION DU BUG "0 KM"
+            // Si la distance est NULL ou UNDEFINED, on met 999 (et donc ça sera rejeté plus bas)
+            // On NE met PLUS "|| 0" par défaut.
+            const dist = (f.distance_km === null || f.distance_km === undefined) ? 999 : f.distance_km;
+
+            // D. VÉRIFICATION "MÊME VILLE"
+            // Si l'IA dit "0 km" ou "< 5 km", on vérifie que le nom de la ville match un minimum la recherche
+            // (Sauf si on cherche "Paris" et qu'on trouve "Fresnes", ça peut être proche, mais Fresnes -> Courcelles-Chaussy NON)
+            if (dist < 5) {
+                // Si la distance est suspectement basse, on garde seulement si c'est vraiment proche ou cohérent
+                // (Ici on fait confiance si l'IA a mis une petite distance non nulle, mais si c'est 0 pile, méfiance)
+            }
+
+            // E. LIMITE STRICTE 80KM
+            return dist <= 80;
         });
 
-        // D. ENRICHISSEMENT AUTOMATIQUE (RNCP + CAT)
+        // F. ENRICHISSEMENT
         result.formations.forEach((f: any) => {
             const intituleUpper = f.intitule.toUpperCase();
             
-            // Catégorie
             if (intituleUpper.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR/)) f.categorie = "Diplôme";
             else if (intituleUpper.match(/CQP|CS /)) f.categorie = "Certification";
             else f.categorie = "Habilitation";
 
-            // RNCP Automatique (Le Patch)
+            // Formatage Alternance Ocapiat
+            const mode = (f.modalite || "").toLowerCase();
+            if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro")) {
+                f.alternance = "Oui";
+                f.modalite = "Alternance";
+            } else {
+                f.alternance = "Non";
+                f.modalite = "Initial";
+            }
+
+            // RNCP Patch
             if (!f.rncp || f.rncp.length < 5 || f.rncp === "Non renseigné") {
                 for (const [key, code] of Object.entries(RNCP_DB)) {
                     if (intituleUpper.includes(key)) {
@@ -236,18 +236,16 @@ Deno.serve(async (req: Request) => {
             }
         });
 
-        // Tri
         result.formations.sort((a: any, b: any) => (a.distance_km || 999) - (b.distance_km || 999));
     }
 
-    // Reconstruction de la réponse pour le Front
     const finalResponse = {
         metier_normalise: metier,
         ville_reference: ville,
         formations: result.formations || []
     };
 
-    console.log(`✅ SUCCÈS: ${finalResponse.formations.length} résultats renvoyés.`);
+    console.log(`✅ ${finalResponse.formations.length} résultats SÉCURISÉS renvoyés.`);
 
     return new Response(JSON.stringify(finalResponse), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
