@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. BASE RNCP (COMPLETE ET VALIDÉE)
+// 1. BASE RNCP (DATA OCAPIAT)
 // ==================================================================================
 const RNCP_DB: Record<string, string> = {
     // SILO & AGRI
@@ -28,11 +28,11 @@ const RNCP_DB: Record<string, string> = {
 };
 
 // ==================================================================================
-// 2. MATRICE PARCOURS (Conforme "Parcours de formation" du cahier des charges)
+// 2. MATRICE MÉTIER
 // ==================================================================================
 const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> = {
     "technico": { 
-        diplomes: ["BTS CCST (ex-TC)", "BTSA Technico-commercial (Agrofournitures/Vins/Jardins)", "BTS NDRC", "Licence Pro Technico-Commercial"],
+        diplomes: ["BTS CCST (ex-TC)", "BTSA Technico-commercial", "BTS NDRC", "Licence Pro Technico-Commercial"],
         contexte: "Cible : Lycées Agricoles (Vital pour le négoce), CFA CCIP, Écoles de Commerce."
     },
     "silo": {
@@ -53,7 +53,7 @@ const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> =
     },
     "magasinier": { 
         diplomes: ["Titre Pro Agent Magasinier", "Bac Pro Logistique", "CACES R489", "Titre Pro Préparateur de commandes"],
-        contexte: "Cible : AFPA, Aftral, Promotrans, Lycées Pros, GRETA (Formation Continue)."
+        contexte: "Cible : AFPA, Aftral, Promotrans, Lycées Pros, GRETA."
     },
     "maintenance": { 
         diplomes: ["BTS Maintenance des Systèmes (MS)", "BUT GIM", "Bac Pro MSPC", "BTS Électrotechnique"],
@@ -81,9 +81,6 @@ const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> =
     }
 };
 
-// ==================================================================================
-// 3. LOGIQUE & DÉTECTION
-// ==================================================================================
 function detecterMetier(input: string): string {
     const m = input.toLowerCase();
     if (m.match(/silo|grain/)) return m.includes("responsable") ? "responsable_silo" : "silo";
@@ -112,24 +109,28 @@ Deno.serve(async (req: Request) => {
     // DÉTECTION
     const metierKey = detecterMetier(metier);
     const config = METIERS_CONFIG[metierKey];
-    console.log(`🌾 BRANCHE NÉGOCE AGRICOLE: "${metier}" (${metierKey}) à "${ville}"`);
+    console.log(`🛡️ V22 HYBRID: "${metier}" (${metierKey}) à "${ville}"`);
 
-    // GÉOGRAPHIE DU NÉGOCE (Rural vs Urbain)
+    // GÉOGRAPHIE DU NÉGOCE (RETOUR A LA LOGIQUE V20 QUI MARCHAIT)
     let zoneRecherche = `${ville} (rayon 50km)`;
     const isAgri = ["silo", "culture", "agreeur", "chauffeur", "responsable_silo"].includes(metierKey);
-    const isBigCity = ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|fresnes|massy|creteil|toulouse/);
+    const isBigCity = ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|fresnes|massy|creteil|toulouse|strasbourg|rennes/);
     
+    // ICI : Je remets les départements explicites pour que l'IA ne se perde pas
     if (isAgri && isBigCity) {
-         zoneRecherche = "Départements limitrophes et zones rurales proches (max 60km)";
+         if (ville.toLowerCase().match(/paris|fresnes|massy|creteil|ile-de-france/)) {
+             zoneRecherche = "Grande Couronne Île-de-France (77, 78, 91, 95)"; // RETOUR V20
+         } else {
+             zoneRecherche = "Périphérie rurale et départements agricoles voisins (max 60km)";
+         }
     }
 
-    // --- PROMPT ALIGNÉ SUR LE CAHIER DES CHARGES ---
-    const systemPrompt = `Tu es le MOTEUR DE RECHERCHE DE FORMATIONS de la branche "NÉGOCE AGRICOLE" (Partenariat Entreprises/OF).
-    Mission : Identifier les Organismes de Formation (OF) de proximité pour favoriser l'alternance et les partenariats.
+    const systemPrompt = `Tu es le MOTEUR DE RECHERCHE DE FORMATIONS de la branche "NÉGOCE AGRICOLE".
+    Mission : Identifier les Organismes de Formation (OF) réels.
     
     RÈGLES DU MARCHÉ :
-    1. EXHAUSTIVITÉ : Cherche la Formation Initiale (Lycées, CFA) ET la Formation Continue (GRETA, AFPA, CFPPA pour adultes).
-    2. RÉALITÉ TERRAIN : Uniquement des établissements physiques existants. Pas d'enseignement à distance pur.
+    1. EXHAUSTIVITÉ : Cherche la Formation Initiale (Lycées, CFA) ET Continue (GRETA, AFPA, CFPPA).
+    2. RÉALITÉ TERRAIN : Uniquement des établissements physiques existants.
     3. PRÉCISION : Nom EXACT de l'OF + Ville EXACTE.
     
     JSON STRICT :
@@ -137,7 +138,7 @@ Deno.serve(async (req: Request) => {
       "formations": [
         {
           "intitule": "Intitulé exact",
-          "organisme": "Nom de l'OF (Lycée, CFA, MFR...)",
+          "organisme": "Nom de l'OF",
           "rncp": "Code ou null",
           "niveau": "3" | "4" | "5" | "6" | "N/A",
           "ville": "Commune exacte",
@@ -150,15 +151,14 @@ Deno.serve(async (req: Request) => {
 
     const userPrompt = `Cartographie l'offre de formation pour : "${config.diplomes.join(", ")}" DANS LA ZONE : "${zoneRecherche}".
     
-    CONTEXTE BRANCHE : ${config.contexte}.
+    CONTEXTE : ${config.contexte}.
     
     IMPORTANT :
-    - Cherche bien les MFR et CFPPA (très importants pour le Négoce Agricole).
+    - Vise 10 à 15 résultats.
     - Vérifie la distance (<80km).
     
     Renvoie le JSON.`;
 
-    // APPEL IA
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${perplexityApiKey}`, 'Content-Type': 'application/json' },
@@ -183,39 +183,32 @@ Deno.serve(async (req: Request) => {
         else throw new Error("Erreur JSON IA");
     }
 
-    // --- FILTRAGE DE SÉCURITÉ ---
     if (result.formations) {
         const niveauCible = niveau === 'all' ? null : niveau.toString();
 
         result.formations = result.formations.filter((f: any) => {
-            // A. Nettoyage Niveau
             if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '').trim();
             if (niveauCible && f.niveau !== 'N/A' && f.niveau !== niveauCible) return false;
 
-            // B. Anti-Flou (On veut des OF précis pour les partenariats)
             const org = f.organisme.toLowerCase();
             const villeF = f.ville.toLowerCase();
-            const badTerms = ["lycées", "réseau", "structures", "organismes", "divers"]; // On tolère "centre" pour AFPA/AFTRAL
+            const badTerms = ["lycées", "réseau", "structures", "organismes", "divers"];
             const badCities = ["secteur", "zone", "départements", "alentours", "proximité"];
             
             if (badTerms.some(t => org.includes(t) && !org.startsWith("lycée") && !org.startsWith("cfa") && !org.startsWith("mfr") && !org.startsWith("centre"))) return false;
             if (badCities.some(v => villeF.includes(v))) return false;
 
-            // C. DISTANCE
             const dist = (f.distance_km === null || f.distance_km === undefined) ? 999 : f.distance_km;
             return dist <= 80;
         });
 
-        // D. ENRICHISSEMENT (Pour l'affichage Catalogue)
         result.formations.forEach((f: any) => {
             const intituleUpper = f.intitule.toUpperCase();
             
-            // Catégorie
             if (intituleUpper.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR|BACHELOR/)) f.categorie = "Diplôme";
             else if (intituleUpper.match(/CQP|CS /)) f.categorie = "Certification";
             else f.categorie = "Habilitation";
 
-            // Alternance (Demande cahier des charges : "Encourager l'alternance")
             const mode = (f.modalite || "").toLowerCase();
             if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro") || mode.includes("mixte")) {
                 f.alternance = "Oui";
@@ -225,7 +218,6 @@ Deno.serve(async (req: Request) => {
                 f.modalite = "Initial";
             }
 
-            // RNCP
             if (!f.rncp || f.rncp.length < 5 || f.rncp === "Non renseigné") {
                 for (const [key, code] of Object.entries(RNCP_DB)) {
                     if (intituleUpper.includes(key)) {
@@ -245,7 +237,7 @@ Deno.serve(async (req: Request) => {
         formations: result.formations || []
     };
 
-    console.log(`✅ OFFRE FORMATION NÉGOCE: ${finalResponse.formations.length} OFs identifiés.`);
+    console.log(`✅ REPAIRED: ${finalResponse.formations.length} résultats.`);
 
     return new Response(JSON.stringify(finalResponse), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
