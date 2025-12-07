@@ -1,5 +1,4 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import OpenAI from "npm:openai@4.72.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,8 +6,45 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// ... Ton SYSTEM_PROMPT reste identique, il est très bien ...
-const SYSTEM_PROMPT = `Tu es un assistant expert... (laisse ton prompt ici)`;
+const SYSTEM_PROMPT = `Tu es un assistant spécialisé dans la recherche de formations professionnelles en France.
+
+Tu dois extraire et structurer les informations sur les formations qui permettent d'accéder à un métier donné.
+
+INSTRUCTIONS :
+1. Recherche des formations diplômantes (CAP, Bac Pro, BTS, BUT, Licence Pro, etc.)
+2. Privilégie les organismes de formation reconnus : CFAA, CFPPA, MFR, CFA, Lycées agricoles, IUT, Universités, GRETA, AFPA
+3. Extrais les informations suivantes pour chaque formation :
+   - intitule : nom exact de la formation
+   - organisme : nom de l'établissement
+   - rncp : code RNCP si disponible (ex: "RNCP35634")
+   - niveau : "4" (Bac), "5" (Bac+2), "6" (Bac+3/4), ou null
+   - ville : ville de l'organisme
+   - region : région française
+   - site_web : URL du site si disponible
+   - type : "Initial", "Alternance", "Continue", ou "Initial/Alternance"
+   - modalite : "Présentiel", "Distance", ou "Mixte"
+
+4. Si le niveau demandé n'est pas "all", filtre uniquement les formations du niveau demandé
+
+RÉPONDS UNIQUEMENT avec un objet JSON de cette structure :
+{
+  "metier_normalise": "nom du métier recherché",
+  "ville_reference": "ville de référence",
+  "niveau_filtre": "4" | "5" | "6" | "all",
+  "formations": [
+    {
+      "intitule": "...",
+      "organisme": "...",
+      "rncp": "...",
+      "niveau": "4" | "5" | "6" | null,
+      "ville": "...",
+      "region": "...",
+      "site_web": "...",
+      "type": "...",
+      "modalite": "..."
+    }
+  ]
+}`;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -18,81 +54,63 @@ Deno.serve(async (req: Request) => {
   try {
     const { metier, ville, niveau } = await req.json();
 
-    if (!metier || !ville || !niveau) throw new Error("Paramètres manquants");
+    if (!metier || !ville || !niveau) {
+      throw new Error("Paramètres manquants");
+    }
 
-    const tavilyApiKey = Deno.env.get("TAVILY_API_KEY");
-    const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!tavilyApiKey || !openaiApiKey) throw new Error("Clés API manquantes");
+    const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
+    if (!perplexityApiKey) {
+      throw new Error("Clé API Perplexity manquante");
+    }
 
-    console.log(`🔎 Recherche: ${metier} à ${ville}`);
+    console.log(`🔎 Recherche Perplexity: ${metier} à ${ville}, niveau ${niveau}`);
 
-    // OPTIMISATION 1 : Requête un peu plus large pour capter les synonymes techniques
-    const query = `formation "${metier}" OR cursus scolaire proche ${ville} France recrutement alternance`;
+    const userPrompt = `Trouve les formations en France pour le métier "${metier}" autour de "${ville}".
+${niveau !== 'all' ? `Uniquement les formations de niveau ${niveau}.` : 'Tous niveaux (4, 5, 6).'}
 
-    // Appel Tavily
-    const tavilyResponse = await fetch('https://api.tavily.com/search', {
+Cherche particulièrement dans les CFAA, CFPPA, MFR, CFA, Lycées agricoles, IUT, Universités, GRETA, AFPA.
+
+Donne-moi les formations avec leurs détails complets (intitulé exact, organisme, ville, région, niveau, type, modalité, site web, code RNCP si disponible).`;
+
+    const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${perplexityApiKey}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        api_key: tavilyApiKey,
-        query: query,
-        max_results: 15, // Réduit à 15 pour gagner du temps de traitement (token & vitesse)
-        search_depth: "advanced",
-        include_domains: ["onisep.fr", "lertudiant.fr", "pole-emploi.fr", "france-travail.fr", ".fr"], // Optionnel : Cible des sites fiables si tu veux
+        model: 'sonar-pro',
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt }
+        ],
+        max_tokens: 4000,
+        temperature: 0.2,
+        return_citations: false,
+        return_images: false
       }),
     });
 
-    if (!tavilyResponse.ok) throw new Error(`Erreur Tavily: ${tavilyResponse.status}`);
-    const tavilyData = await tavilyResponse.json();
-    const allResults = tavilyData.results || [];
-
-    if (allResults.length === 0) {
-      return new Response(JSON.stringify({ metier_normalise: metier, ville_reference: ville, niveau_filtre: niveau, formations: [] }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!perplexityResponse.ok) {
+      const errorText = await perplexityResponse.text();
+      console.error('Perplexity API error:', errorText);
+      throw new Error(`Erreur Perplexity API: ${perplexityResponse.status}`);
     }
 
-    // Préparation pour OpenAI
-    const rawData = allResults
-      .map((r: any) => `Source: ${r.title} (${r.url})\nTxt: ${r.content.substring(0, 800)}`) // Limite le contenu par résultat pour économiser des tokens
-      .join("\n\n");
+    const perplexityData = await perplexityResponse.json();
+    const content = perplexityData.choices[0].message.content;
 
-    const openai = new OpenAI({ apiKey: openaiApiKey });
-
-    const userPrompt = `Analyse ces résultats Tavily pour le métier "${metier}" à "${ville}".
-    Niveau: ${niveau}.
-    
-    DONNÉES:
-    ${rawData}
-    
-    Renvoie le JSON strict demandé dans le System Prompt.`;
-
-    console.log('🤖 Appel OpenAI o3-mini...');
-
-    const completion = await openai.chat.completions.create({
-      model: 'o3-mini', 
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt }
-      ],
-      // @ts-ignore: reasoning_effort est nouveau, parfois TS rale
-      reasoning_effort: "low", // IMPORTANT: On demande à o3 de ne pas trop réfléchir pour aller vite (évite le timeout)
-      max_completion_tokens: 4000, 
-      response_format: { type: 'json_object' } // Force le JSON pur
-    });
-
-    const content = completion.choices[0].message.content;
-
-    // SECURITE JSON : On essaie de parser directement, sinon on nettoie
     let result;
     try {
-        result = JSON.parse(content || "{}");
+      result = JSON.parse(content);
     } catch (e) {
-        console.warn("JSON direct échoué, tentative regex");
-        const jsonMatch = content?.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            result = JSON.parse(jsonMatch[0]);
-        } else {
-            throw new Error("Impossible de parser le JSON OpenAI");
-        }
+      console.warn("JSON direct échoué, tentative regex");
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("Impossible de parser le JSON Perplexity");
+      }
     }
 
     console.log(`✅ Formations trouvées: ${result.formations?.length || 0}`);
