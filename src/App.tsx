@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Wheat, Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { SearchForm } from './components/SearchForm';
 import { FormationMap, FormationMapRef } from './components/FormationMap';
 import { FormationList } from './components/FormationList';
@@ -70,16 +70,13 @@ function App() {
     <div className="flex h-screen overflow-hidden bg-gray-100">
       <div className="w-96 bg-white shadow-xl overflow-y-auto flex-shrink-0 flex flex-col">
         <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-red-50 to-white">
-          <div className="flex items-center gap-3 mb-3">
-            <Wheat className="h-8 w-8 text-[#EB600A]" />
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
-                Formations Agricoles
-              </h1>
-              <p className="text-xs text-gray-600">
-                Négociants Agricoles France
-              </p>
-            </div>
+          <div className="mb-3">
+            <h1 className="text-xl font-bold text-gray-900">
+              Formations Agricoles
+            </h1>
+            <p className="text-xs text-gray-600">
+              Négociants Agricoles France
+            </p>
           </div>
         </div>
 
@@ -126,7 +123,6 @@ function App() {
 
         {!isLoading && formations.length === 0 && !error && !hasSearched && (
           <div className="px-4 py-8 text-center">
-            <Wheat className="h-12 w-12 text-gray-300 mx-auto mb-3" />
             <p className="text-sm text-gray-500">
               Sélectionnez un métier et une ville pour voir les formations sur la carte
             </p>
@@ -174,12 +170,14 @@ function App() {
 
       <div className="flex-1 relative">
         {isLoading && (
-          <div className="absolute inset-0 bg-white bg-opacity-90 z-50 flex flex-col items-center justify-center">
-            <Loader2 className="h-12 w-12 text-[#EB600A] animate-spin mb-4" />
-            <p className="text-gray-600 font-medium">Recherche en cours...</p>
-            <p className="text-sm text-gray-500 mt-2">
-              Géolocalisation des formations
-            </p>
+          <div className="absolute inset-0 bg-gray-50 bg-opacity-95 z-50 flex items-center justify-center">
+            <div className="bg-white rounded-lg shadow-lg px-6 py-5 flex items-center gap-4">
+              <Loader2 className="h-5 w-5 text-[#EB600A] animate-spin" />
+              <div>
+                <p className="text-sm font-medium text-gray-900">Recherche en cours</p>
+                <p className="text-xs text-gray-500 mt-0.5">Analyse des formations disponibles...</p>
+              </div>
+            </div>
           </div>
         )}
 
