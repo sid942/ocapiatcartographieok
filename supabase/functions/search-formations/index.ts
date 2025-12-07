@@ -6,21 +6,41 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- DATA RNCP ---
+// ==================================================================================
+// 1. DATA RNCP (COMPLÉTÉE AVEC TES RÉSULTATS)
+// ==================================================================================
 const RNCP_DB: Record<string, string> = {
-    "AGROÉQUIPEMENT": "RNCP38234", "AGENT DE SILO": "RNCP28779", "GDEA": "RNCP38243",
-    "MAINTENANCE DES MATÉRIELS": "RNCP37039", "CGEA": "RNCP31670", "PRODUCTIONS VÉGÉTALES": "RNCP38241",
-    "AGRONOMIE": "RNCP35850", "ACSE": "RNCP38240", "RESPONSABLE DE SILO": "RNCP_BRANCHE",
-    "GTLA": "RNCP35364", "QLIO": "RNCP35367", "TSMEL": "RNCP34360", "AGENT MAGASINIER": "RNCP38413",
-    "LOGISTIQUE": "RNCP38416", "PRÉPARATEUR DE COMMANDES": "RNCP38417", "CHAIN LOGISTIQUE": "RNCP31112",
-    "MAINTENANCE DES SYSTÈMES": "RNCP35323", "MSPC": "RNCP35475", "GIM": "RNCP35365",
-    "ÉLECTROTECHNIQUE": "RNCP35349", "CRSA": "RNCP35342", "PILOTE DE LIGNE": "RNCP35602",
-    "CCST": "RNCP35801", "TECHNICO-COMMERCIAL": "RNCP38368", "NDRC": "RNCP38368", "TC": "RNCP35366",
-    "COMMERCE INTERNATIONAL": "RNCP38372", "MANAGER INTERNATIONAL": "RNCP34206",
-    "BIOQUALITÉ": "RNCP38235", "CONDUCTEUR ROUTIER": "RNCP35310", "AGRÉEUR": "RNCP_BRANCHE"
+    // TRANSPORT & ROUTIER
+    "CONDUCTEUR DU TRANSPORT ROUTIER": "RNCP35293", 
+    "CONDUCTEUR ROUTIER": "RNCP35310",
+    "PORTEUR": "RNCP35293", 
+    "TOUS VÉHICULES": "RNCP35292",
+    
+    // AGRI & MACHINES
+    "CONDUITE D'ENGINS": "RNCP2968",
+    "TRACTEURS": "RNCP2968",
+    "AGROÉQUIPEMENT": "RNCP38234",
+    "MAINTENANCE DES MATÉRIELS": "RNCP37039",
+    "CGEA": "RNCP31670",
+    
+    // SILO & GRAIN
+    "AGENT DE SILO": "RNCP28779",
+    "GDEA": "RNCP38243",
+    "RESPONSABLE DE SILO": "RNCP_BRANCHE",
+    
+    // LOGISTIQUE
+    "GTLA": "RNCP35364", "QLIO": "RNCP35367", "TSMEL": "RNCP34360", 
+    "AGENT MAGASINIER": "RNCP38413", "LOGISTIQUE": "RNCP38416", 
+    "PRÉPARATEUR DE COMMANDES": "RNCP38417", "CHAIN LOGISTIQUE": "RNCP31112",
+    
+    // COMMERCE & AUTRES
+    "CCST": "RNCP35801", "TECHNICO-COMMERCIAL": "RNCP38368", "NDRC": "RNCP38368",
+    "COMMERCE INTERNATIONAL": "RNCP38372", "BIOQUALITÉ": "RNCP38235", "AGRÉEUR": "RNCP_BRANCHE"
 };
 
-// --- CONFIG MÉTIERS ---
+// ==================================================================================
+// 2. CONFIG MÉTIERS (INCHANGÉE CAR PARFAITE)
+// ==================================================================================
 const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> = {
     "technico": { 
         diplomes: ["BTS CCST (ex-TC)", "BTSA Technico-commercial", "BTS NDRC", "Licence Pro Technico-Commercial"],
@@ -31,8 +51,8 @@ const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> =
         contexte: "Lycées Agricoles, CFPPA, MFR."
     },
     "chauffeur": { 
-        diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur transport", "CS Conduite machines agricoles"],
-        contexte: "Aftral, Promotrans, Lycées Agricoles."
+        diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur du transport routier", "CS Conduite de machines agricoles"],
+        contexte: "Aftral, Promotrans, Lycées Agricoles (Machinisme)."
     },
     "responsable_silo": { 
         diplomes: ["CS Responsable de silo", "Licence Pro Management agri", "BTSA GDEA"],
@@ -85,7 +105,7 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 function detecterMetier(input: string): string {
     const m = input.toLowerCase();
     if (m.match(/silo|grain/)) return m.includes("responsable") ? "responsable_silo" : "silo";
-    if (m.match(/culture|végétal|céréale|agronomie/)) return "culture";
+    if (m.match(/culture|végétal|céréale/)) return "culture";
     if (m.match(/chauffeur|conducteur|routier/)) return m.includes("ligne") ? "ligne" : "chauffeur";
     if (m.match(/maintenance|technique/)) return "maintenance";
     if (m.match(/logistique|supply/)) return m.includes("responsable") ? "logistique" : "magasinier";
@@ -107,7 +127,7 @@ Deno.serve(async (req: Request) => {
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    // 1. API GOUV (GPS UTILISATEUR)
+    // 1. API GOUV
     let userLat = 0, userLon = 0;
     try {
         const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
@@ -122,7 +142,6 @@ Deno.serve(async (req: Request) => {
     const metierKey = detecterMetier(metier);
     const config = METIERS_CONFIG[metierKey];
     
-    // Stratégie géographique : Pour Fresnes/Paris, on force la périphérie pour les métiers Agri
     let zonePrompt = `${ville} (Rayon 50km)`;
     const isAgri = ["silo", "culture", "agreeur", "chauffeur", "responsable_silo"].includes(metierKey);
     const isBigCity = ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|fresnes|massy|creteil/);
@@ -133,8 +152,7 @@ Deno.serve(async (req: Request) => {
     JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "rncp": "", "modalite": "", "niveau": "" }] }`;
 
     const userPrompt = `Liste 15 établissements pour : "${config.diplomes.join(", ")}" DANS LA ZONE : "${zonePrompt}".
-    CONTEXTE : ${config.contexte}.
-    Pas de doublons. Donne la ville exacte. JSON uniquement.`;
+    CONTEXTE : ${config.contexte}. JSON uniquement.`;
 
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
@@ -150,7 +168,7 @@ Deno.serve(async (req: Request) => {
     if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
-    // --- 3. PARSING ---
+    // 3. PARSING
     let result;
     try {
         const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -158,23 +176,17 @@ Deno.serve(async (req: Request) => {
         const end = clean.lastIndexOf('}');
         if(start !== -1 && end !== -1) {
             result = JSON.parse(clean.substring(start, end + 1));
-        } else {
-            throw new Error("JSON introuvable");
-        }
-    } catch (e) {
-        result = { formations: [] }; // Fallback vide pour éviter le crash
-    }
+        } else { throw new Error("JSON introuvable"); }
+    } catch (e) { result = { formations: [] }; }
 
-    // --- 4. VALIDATION HYBRIDE (C'est ici que ça change) ---
+    // 4. VALIDATION HYBRIDE & CORRECTIONS
     if (result.formations && result.formations.length > 0) {
         const verificationPromises = result.formations.map(async (f: any) => {
             try {
-                // TENTATIVE 1 : RECHERCHE EXACTE (Organisme + Ville)
                 let query = `${f.organisme} ${f.ville}`;
                 let apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=1`);
                 let apiData = await apiRep.json();
 
-                // TENTATIVE 2 : SAUVETAGE (Ville seule si organisme non trouvé)
                 if (!apiData.features || apiData.features.length === 0) {
                     apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(f.ville)}&type=municipality&limit=1`);
                     apiData = await apiRep.json();
@@ -182,22 +194,13 @@ Deno.serve(async (req: Request) => {
 
                 if (apiData.features && apiData.features.length > 0) {
                     const feature = apiData.features[0];
-                    const realCoords = feature.geometry.coordinates; // [lon, lat]
-                    
-                    // On ne corrige le nom de la ville que si c'était une recherche précise
-                    // Sinon on garde le nom donné par l'IA mais on utilise les coords de la ville pour la distance
+                    const realCoords = feature.geometry.coordinates;
                     
                     if (userLat !== 0) {
                         f.distance_km = haversineDistance(userLat, userLon, realCoords[1], realCoords[0]);
-                    } else { 
-                        f.distance_km = 999; 
-                    }
-                } else {
-                    f.distance_km = 999; // Adresse totalement inconnue
-                }
-            } catch (err) {
-                f.distance_km = 999;
-            }
+                    } else { f.distance_km = 999; }
+                } else { f.distance_km = 999; }
+            } catch (err) { f.distance_km = 999; }
             return f;
         });
 
@@ -208,6 +211,7 @@ Deno.serve(async (req: Request) => {
         const uniqueSet = new Set();
 
         result.formations = result.formations.filter((f: any) => {
+            // Nettoyage niveau (On garde propre pour plus tard)
             if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '').trim();
             if (niveauCible && f.niveau !== 'N/A' && f.niveau !== niveauCible) return false;
 
@@ -218,24 +222,38 @@ Deno.serve(async (req: Request) => {
             if (uniqueSet.has(key)) return false;
             uniqueSet.add(key);
 
-            // FILTRE DISTANCE (80km)
             return (f.distance_km || 999) <= 80;
         });
 
-        // ENRICHISSEMENT
+        // 6. ENRICHISSEMENT FINAL (RNCP + COSMÉTIQUE NIVEAU)
         result.formations.forEach((f: any) => {
             const intituleUpper = f.intitule.toUpperCase();
+            
+            // Catégorie
             if (intituleUpper.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR/)) f.categorie = "Diplôme";
             else if (intituleUpper.match(/CQP|CS /)) f.categorie = "Certification";
             else f.categorie = "Habilitation";
 
+            // Alternance
             const mode = (f.modalite || "").toLowerCase();
-            if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro") || mode.includes("mixte")) {
+            if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro")) {
                 f.alternance = "Oui"; f.modalite = "Alternance";
             } else {
                 f.alternance = "Non"; f.modalite = "Initial";
             }
 
+            // NETTOYAGE NIVEAU (Pour éviter "NTitre professionnel")
+            // Si le niveau n'est pas un chiffre simple, on essaie de le déduire
+            if (!["3", "4", "5", "6", "N/A"].includes(f.niveau)) {
+                if (intituleUpper.includes("CAP") || intituleUpper.includes("TITRE PROFESSIONNEL") || intituleUpper.includes("BPA")) f.niveau = "3";
+                else if (intituleUpper.includes("BAC") || intituleUpper.includes("BP")) f.niveau = "4";
+                else if (intituleUpper.includes("BTS") || intituleUpper.includes("DEUST")) f.niveau = "5";
+                else if (intituleUpper.includes("BUT") || intituleUpper.includes("LICENCE") || intituleUpper.includes("BACHELOR")) f.niveau = "6";
+                else if (intituleUpper.includes("MASTER")) f.niveau = "7";
+                else f.niveau = "N/A"; // CQP et CS n'ont pas toujours de niveau officiel
+            }
+
+            // RNCP
             if (!f.rncp || f.rncp.length < 5) {
                 for (const [key, code] of Object.entries(RNCP_DB)) {
                     if (intituleUpper.includes(key)) { f.rncp = code; break; }
@@ -254,7 +272,7 @@ Deno.serve(async (req: Request) => {
         formations: result.formations || []
     };
 
-    console.log(`✅ V27 RESCUE: ${finalResponse.formations.length} résultats.`);
+    console.log(`✅ V28 FINAL POLISHED: ${finalResponse.formations.length} résultats.`);
 
     return new Response(JSON.stringify(finalResponse), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
