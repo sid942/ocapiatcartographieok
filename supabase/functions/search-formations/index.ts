@@ -6,14 +6,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- CONFIGURATION EXPERT V5 (DENSITÉ & PRÉCISION) ---
+// --- SYSTEM PROMPT (Inchangé car il est très bon) ---
 const SYSTEM_PROMPT = `Tu es un expert en orientation scolaire pour OCAPIAT.
 Ton objectif est de fournir une liste DENSE et EXHAUSTIVE de lieux de formation.
 
 RÈGLES D'OR :
-1. QUANTITÉ & QUALITÉ : Pour une grande ville comme Paris, tu dois trouver au moins 5 à 10 établissements pertinents. Ne t'arrête pas au premier résultat.
-2. LIEU PHYSIQUE : Cherche les Lycées, CFA, IUT, Écoles de Commerce. Pas de sièges sociaux.
-3. FAMILLES MÉTIERS : Respecte strictement les mots-clés techniques fournis ci-dessous.
+1. QUANTITÉ & QUALITÉ : Trouve au moins 5 à 10 établissements pertinents.
+2. LIEU PHYSIQUE : Cherche les Lycées, CFA, IUT, Écoles. Pas de sièges sociaux.
+3. PRÉCISION MÉTIER : Respecte strictement les mots-clés techniques fournis.
 
 FORMAT JSON STRICT :
 {
@@ -21,7 +21,7 @@ FORMAT JSON STRICT :
   "ville_reference": "string",
   "formations": [
     {
-      "intitule": "Nom complet (ex: BTS CCST)",
+      "intitule": "Nom complet",
       "organisme": "Nom de l'école",
       "rncp": "Code ou null",
       "categorie": "Diplôme" | "Certification" | "Habilitation",
@@ -41,59 +41,92 @@ Deno.serve(async (req: Request) => {
 
   try {
     const { metier, ville, niveau } = await req.json();
-
     if (!metier || !ville || !niveau) throw new Error("Paramètres manquants");
 
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    console.log(`🔎 Recherche V5 (Densité): ${metier} à ${ville}`);
+    console.log(`🔎 Recherche V6 (Ultimate): ${metier} à ${ville}`);
 
-    // --- ENRICHISSEMENT INTELLIGENT (AJOUT BTS CCST & AGRI) ---
+    // --- MAPPING DES 12 MÉTIERS OCAPIAT (VISION 360°) ---
     let motsClesTechniques = "";
     let instructionsExclusion = ""; 
 
     const m = metier.toLowerCase();
 
-    if (m.includes("services techniques") || m.includes("maintenance")) {
-        motsClesTechniques = "BTS Maintenance des Systèmes (MS), BUT Génie Industriel et Maintenance (GIM), BTS Électrotechnique, BTS CRSA (Automatisme), Bac Pro MSPC.";
-        instructionsExclusion = "EXCLURE : Logistique, Transport Routier, Maintenance auto.";
-    } 
-    else if (m.includes("silo")) {
-        motsClesTechniques = "Bac Pro Agroéquipement, CAP Maintenance des matériels, CQP Agent de silo, CS Maintenance, BTSA GDEA.";
-        instructionsExclusion = "EXCLURE : Boulangerie, Cuisine.";
+    // 1. FAMILLE SILO (Agent, Responsable, Conducteur silo)
+    if (m.includes("silo")) {
+        motsClesTechniques = "Bac Pro Agroéquipement, CQP Agent de silo, CS Maintenance des matériels, BTSA GDEA (Génie des Équipements Agricoles), CAP Agricole, Certificat de Spécialisation (CS) Stockage.";
+        instructionsExclusion = "EXCLURE : Cuisine, Métiers de bouche, BTP (Maçonnerie).";
     }
-    else if (m.includes("magasinier") || m.includes("cariste") || m.includes("logistique")) {
-        motsClesTechniques = "Titre Pro Agent Magasinier, Bac Pro Logistique, TSMEL, CACES R489, BUT QLIO (Qualité Logistique).";
-        instructionsExclusion = "EXCLURE : Maintenance industrielle, Mécanique.";
+    // 2. FAMILLE LOGISTIQUE (Magasinier, Cariste, Resp Logistique)
+    else if (m.includes("magasinier") || m.includes("cariste") || (m.includes("logistique") && !m.includes("responsable"))) {
+        // Niveau opérationnel
+        motsClesTechniques = "Titre Pro Agent Magasinier, Bac Pro Logistique, CACES R489 (1, 3, 5), CAP Opérateur Logistique.";
+        instructionsExclusion = "EXCLURE : Transport Routier (Conduite camion), Maintenance mécanique.";
     }
-    else if (m.includes("conduite") || m.includes("ligne")) {
-        motsClesTechniques = "Pilote de ligne de production, CQP Conducteur de ligne, BTS Pilotage de procédés, Bac Pro PSPA (Pilotage de systèmes).";
-        instructionsExclusion = "EXCLURE : Poids lourds, Transport.";
+    else if (m.includes("responsable logistique")) {
+        // Niveau encadrement
+        motsClesTechniques = "BUT QLIO (Qualité Logistique), TSMEL (Technicien Supérieur en Méthodes et Exploitation Logistique), Master Logistique, BTS GTLA.";
+        instructionsExclusion = "EXCLURE : CACES seul (ce n'est pas suffisant pour un responsable).";
     }
-    // --- C'EST ICI QUE J'AI CORRIGÉ POUR TECHNICO-COMMERCIAL ---
-    else if (m.includes("commercial")) {
-        // Ajout massif des diplômes clés (CCST, TC, BTSA)
-        motsClesTechniques = "BTS CCST (Conseil et Commercialisation de Solutions Techniques - ex BTS TC), BTSA Technico-commercial (Agrofournitures / Vins / Jardins), BTS NDRC, BUT Techniques de Commercialisation (TC), Licence Pro Technico-Commercial, Bachelor Business Developer.";
-        instructionsExclusion = "EXCLURE : Comptabilité, Gestion pure, RH, Secrétariat.";
+    // 3. FAMILLE MAINTENANCE (Responsable services techniques)
+    else if (m.includes("services techniques") || m.includes("maintenance")) {
+        motsClesTechniques = "BTS Maintenance des Systèmes (MS), BUT Génie Industriel et Maintenance (GIM), BTS Électrotechnique, BTS CRSA, Bac Pro MSPC.";
+        instructionsExclusion = "EXCLURE : Logistique, Transport, Garage auto (VL).";
     }
+    // 4. FAMILLE COMMERCE (Technico-co, Commercial Export)
+    else if (m.includes("technico") || (m.includes("commercial") && !m.includes("export"))) {
+        motsClesTechniques = "BTS CCST (Conseil et Commercialisation de Solutions Techniques), BTSA Technico-commercial (Agrofournitures), BTS NDRC, BUT TC.";
+        instructionsExclusion = "EXCLURE : Caisse, Vente en magasin de mode.";
+    }
+    else if (m.includes("export")) {
+        motsClesTechniques = "BTS Commerce International (CI), BUT TC (Parcours International), Master Commerce International, Licence Pro Export.";
+        instructionsExclusion = "EXCLURE : Vente locale, Immobilier.";
+    }
+    // 5. FAMILLE QUALITÉ (Contrôleur qualité, Agréeur)
+    else if (m.includes("contrôleur qualité") || m.includes("qualité")) {
+        motsClesTechniques = "BTSA Bioqualité (ex QIA), BUT Génie Biologique (IAB), Licence Pro Qualité Agroalimentaire, BTS QIABI.";
+        instructionsExclusion = "EXCLURE : Qualité aéronautique, Qualité automobile.";
+    }
+    else if (m.includes("agréeur") || m.includes("agréage")) {
+        // Métier très spécifique (grain)
+        motsClesTechniques = "CQP Agréeur, Formation classement des grains, BTSA Agronomie (Productions Végétales), CS Responsable de silo.";
+        instructionsExclusion = "EXCLURE : Agrément assurance, Immobilier.";
+    }
+    // 6. FAMILLE PRODUCTION (Conducteur de ligne)
+    else if (m.includes("conducteur de ligne") || m.includes("ligne")) {
+        motsClesTechniques = "Pilote de ligne de production (PLP), CQP Conducteur de ligne, Bac Pro PSPA (Pilotage de systèmes), BTS Pilotage de procédés.";
+        instructionsExclusion = "EXCLURE : Conducteur de bus, Conducteur de train, Ligne électrique.";
+    }
+    // 7. FAMILLE AGRONOMIE (Technicien culture, Chauffeur agricole)
+    else if (m.includes("technicien culture") || m.includes("culture")) {
+        motsClesTechniques = "BTSA Agronomie et Productions Végétales (APV), BTSA ACSE, Licence Pro Agronomie, Ingénieur Agri.";
+        instructionsExclusion = "EXCLURE : Jardinerie, Paysagiste (Espaces verts), Culture (Art).";
+    }
+    else if (m.includes("chauffeur")) {
+        // Cas délicat : Chauffeur agricole vs Routier
+        motsClesTechniques = "CAP Conducteur Routier Marchandises, Titre Pro Conducteur du transport routier (Porteur/Super Lourd), FIMO, CS Conduite de machines agricoles.";
+        instructionsExclusion = "EXCLURE : Chauffeur VTC, Taxi, Bus.";
+    }
+    // FALLBACK (Sécurité)
     else {
-        motsClesTechniques = "Formations diplômantes, Titres Pro RNCP, CQP de branche.";
+        motsClesTechniques = "Formations diplômantes du secteur agricole et alimentaire (OCAPIAT).";
         instructionsExclusion = "";
     }
 
-    const userPrompt = `Trouve une liste complète (minimum 6-8 résultats si possible) des formations pour "${metier}" à "${ville}" (Max 60km).
+    const userPrompt = `Trouve une liste complète (minimum 6-8 résultats) des formations pour "${metier}" à "${ville}" (Max 60km).
     
     DIPLÔMES CIBLES (Mots-clés prioritaires) : ${motsClesTechniques}
     
-    ⛔ EXCLUSIONS : ${instructionsExclusion}
+    ⛔ EXCLUSIONS STRICTES : ${instructionsExclusion}
     
     Filtre Niveau : ${niveau === 'all' ? 'Tout (CAP à Bac+5)' : 'Niveau ' + niveau}.
 
     INSTRUCTIONS :
-    1. Diversifie les organismes : Cherche à la fois les Lycées Publics, les CFA, les Écoles de Commerce et les IUT.
-    2. Pour Technico-Commercial, privilégie le BTS CCST et le BTSA Technico-commercial.
-    3. Indique la distance réelle et le code RNCP.
+    1. Diversifie les organismes (Lycées, CFA, IUT, Écoles).
+    2. Vérifie la cohérence du métier (ex: Pas de logistique pour un poste de maintenance).
+    3. Indique la distance réelle et le RNCP.
     
     Retourne uniquement le JSON.`;
 
