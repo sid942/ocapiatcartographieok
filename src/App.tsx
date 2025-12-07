@@ -112,7 +112,16 @@ function App() {
           </div>
         )}
 
-        {formations.length > 0 && (
+        {isLoading && (
+          <div className="flex-1 flex items-center justify-center py-16">
+            <div className="text-center">
+              <Loader2 className="h-10 w-10 text-[#EB600A] animate-spin mx-auto mb-4" />
+              <p className="text-sm text-gray-600">Interrogation des bases de données...</p>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && formations.length > 0 && (
           <div className="px-4 pb-4">
             <FormationList
               formations={formations}
