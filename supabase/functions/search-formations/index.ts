@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- DATA RNCP (Pour la conformité Ocapiat) ---
+// --- DATA RNCP ---
 const RNCP_DB: Record<string, string> = {
     "AGROÉQUIPEMENT": "RNCP38234", "AGENT DE SILO": "RNCP28779", "GDEA": "RNCP38243",
     "MAINTENANCE DES MATÉRIELS": "RNCP37039", "CGEA": "RNCP31670", "PRODUCTIONS VÉGÉTALES": "RNCP38241",
@@ -72,14 +72,12 @@ const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> =
     }
 };
 
-// --- OUTILS MATHÉMATIQUES (CALCUL DISTANCE GPS) ---
+// --- OUTILS MATHÉMATIQUES ---
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-    const R = 6371; // Rayon Terre km
+    const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = 
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return Math.round(R * c);
 }
@@ -109,33 +107,28 @@ Deno.serve(async (req: Request) => {
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    // 1. GÉOLOCALISATION UTILISATEUR (Via API Gouv - Gratuit & Fiable)
+    // 1. API GOUV (GPS UTILISATEUR)
     let userLat = 0, userLon = 0;
     try {
         const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
         const geoData = await geoRep.json();
-        if (geoData.features && geoData.features.length > 0) {
+        if (geoData.features?.length > 0) {
             const coords = geoData.features[0].geometry.coordinates;
-            userLon = coords[0];
-            userLat = coords[1];
-            console.log(`📍 GPS Utilisateur (${ville}) : ${userLat}, ${userLon}`);
+            userLon = coords[0]; userLat = coords[1];
         }
-    } catch (e) { console.error("Erreur Geo User", e); }
+    } catch (e) { console.error("Erreur Geo", e); }
 
-    // 2. CONFIG MÉTIER
+    // 2. CONFIG IA
     const metierKey = detecterMetier(metier);
     const config = METIERS_CONFIG[metierKey];
     
-    // Stratégie géographique (pour l'IA)
     let zonePrompt = `${ville} (Rayon 50km)`;
     const isAgri = ["silo", "culture", "agreeur", "chauffeur", "responsable_silo"].includes(metierKey);
     const isBigCity = ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|fresnes|massy|creteil/);
     if (isAgri && isBigCity) zonePrompt = "Départements limitrophes et zones rurales proches (max 60km)";
 
-    // 3. APPEL IA (Pour trouver les noms d'écoles)
     const systemPrompt = `Tu es un MOTEUR DE RECHERCHE D'ÉTABLISSEMENTS.
     Trouve les établissements réels. 
-    RÈGLES : Vise 15 résultats. Donne le NOM EXACT de l'école + la VILLE.
     JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "rncp": "", "modalite": "", "niveau": "" }] }`;
 
     const userPrompt = `Liste les établissements pour : "${config.diplomes.join(", ")}" DANS LA ZONE : "${zonePrompt}".
@@ -155,88 +148,73 @@ Deno.serve(async (req: Request) => {
     if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
-    // Parsing
+    // --- 3. PARSING BLINDÉ (C'est ici que ça change) ---
     let result;
+    const content = data.choices[0].message.content;
+    
     try {
-        const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
-        result = JSON.parse(clean);
+        // Extraction chirurgicale du JSON : On cherche le premier { et le dernier }
+        const firstOpen = content.indexOf('{');
+        const lastClose = content.lastIndexOf('}');
+        
+        if (firstOpen !== -1 && lastClose !== -1) {
+            const jsonString = content.substring(firstOpen, lastClose + 1);
+            result = JSON.parse(jsonString);
+        } else {
+            throw new Error("Aucune structure JSON trouvée dans la réponse");
+        }
     } catch (e) {
-        const match = data.choices[0].message.content.match(/\{[\s\S]*\}/);
-        if (match) result = JSON.parse(match[0]);
-        else throw new Error("Erreur JSON IA");
+        console.error("CRITICAL PARSE ERROR:", content);
+        // Fallback vide pour éviter le crash complet de l'app
+        result = { formations: [] }; 
     }
 
-    // 4. LE MIRACLE : VALIDATION & CORRECTION VIA API GOUV
-    // On va vérifier chaque adresse trouvée par l'IA avec la base officielle
-    if (result.formations) {
-        // On lance toutes les vérifications en parallèle pour que ce soit rapide
+    // --- 4. VALIDATION & CORRECTION VIA API GOUV ---
+    if (result.formations && result.formations.length > 0) {
         const verificationPromises = result.formations.map(async (f: any) => {
             try {
-                // On demande à l'API Gouv : "C'est où [Organisme] à [Ville] ?"
                 const query = `${f.organisme} ${f.ville}`;
                 const apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=1`);
                 const apiData = await apiRep.json();
 
-                if (apiData.features && apiData.features.length > 0) {
+                if (apiData.features?.length > 0) {
                     const feature = apiData.features[0];
-                    const realCoords = feature.geometry.coordinates; // [lon, lat]
-                    
-                    // CORRECTION 1 : La Ville officielle
                     f.ville = feature.properties.city; 
-                    
-                    // CORRECTION 2 : Le Calcul de Distance Réel
                     if (userLat !== 0) {
-                        f.distance_km = haversineDistance(userLat, userLon, realCoords[1], realCoords[0]);
-                    } else {
-                        f.distance_km = 999; // Si on a pas pu localiser l'user
-                    }
-                    
-                    f.adresse_verifiee = true;
-                } else {
-                    // Si l'État ne connait pas l'adresse, on penalise
-                    f.distance_km = 999; 
-                }
-            } catch (err) {
-                f.distance_km = 999;
-            }
+                        f.distance_km = haversineDistance(userLat, userLon, feature.geometry.coordinates[1], feature.geometry.coordinates[0]);
+                    } else { f.distance_km = 999; }
+                } else { f.distance_km = 999; }
+            } catch (err) { f.distance_km = 999; }
             return f;
         });
 
-        // On attend que tout soit vérifié
         await Promise.all(verificationPromises);
 
-        // 5. FILTRE FINAL (Maintenant qu'on a les vraies distances)
+        // 5. FILTRAGE ET ENRICHISSEMENT
         const niveauCible = niveau === 'all' ? null : niveau.toString();
         const uniqueSet = new Set();
 
         result.formations = result.formations.filter((f: any) => {
-            // Nettoyage niveau
             if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '').trim();
             if (niveauCible && f.niveau !== 'N/A' && f.niveau !== niveauCible) return false;
 
-            // Filtre Anti-Flou (Toujours utile)
             const org = f.organisme.toLowerCase();
             if (org.includes("lycées") || org.includes("réseau")) return false;
 
-            // Dédoublonnage
             const key = `${f.intitule}-${f.organisme}`;
             if (uniqueSet.has(key)) return false;
             uniqueSet.add(key);
 
-            // FILTRE SUPRÊME : VRAIE DISTANCE
-            // On accepte 80km. Comme c'est calculé par GPS, c'est fiable.
             return (f.distance_km || 999) <= 80;
         });
 
-        // Enrichissement final
         result.formations.forEach((f: any) => {
-            // Catégorie
             const intituleUpper = f.intitule.toUpperCase();
+            
             if (intituleUpper.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR/)) f.categorie = "Diplôme";
             else if (intituleUpper.match(/CQP|CS /)) f.categorie = "Certification";
             else f.categorie = "Habilitation";
 
-            // Alternance
             const mode = (f.modalite || "").toLowerCase();
             if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro")) {
                 f.alternance = "Oui"; f.modalite = "Alternance";
@@ -244,7 +222,6 @@ Deno.serve(async (req: Request) => {
                 f.alternance = "Non"; f.modalite = "Initial";
             }
 
-            // RNCP
             if (!f.rncp || f.rncp.length < 5) {
                 for (const [key, code] of Object.entries(RNCP_DB)) {
                     if (intituleUpper.includes(key)) { f.rncp = code; break; }
@@ -252,8 +229,10 @@ Deno.serve(async (req: Request) => {
             }
         });
 
-        // Tri propre
         result.formations.sort((a: any, b: any) => a.distance_km - b.distance_km);
+    } else {
+        // Sécurité si result.formations est vide ou undefined
+        result.formations = [];
     }
 
     const finalResponse = {
@@ -262,7 +241,7 @@ Deno.serve(async (req: Request) => {
         formations: result.formations || []
     };
 
-    console.log(`✅ V25 GPS-VERIFIED: ${finalResponse.formations.length} résultats.`);
+    console.log(`✅ V26 FINAL: ${finalResponse.formations.length} résultats.`);
 
     return new Response(JSON.stringify(finalResponse), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
