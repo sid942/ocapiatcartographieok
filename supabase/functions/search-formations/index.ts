@@ -6,14 +6,16 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- SYSTEM PROMPT (Inchangé car il est très bon) ---
-const SYSTEM_PROMPT = `Tu es un expert en orientation scolaire pour OCAPIAT.
-Ton objectif est de fournir une liste DENSE et EXHAUSTIVE de lieux de formation.
+// --- SYSTEM PROMPT EXPERT OCAPIAT ---
+const SYSTEM_PROMPT = `Tu es un auditeur expert en formation pour OCAPIAT.
+Ta mission est de valider des parcours de formation cohérents, locaux et certifiants.
 
-RÈGLES D'OR :
-1. QUANTITÉ & QUALITÉ : Trouve au moins 5 à 10 établissements pertinents.
-2. LIEU PHYSIQUE : Cherche les Lycées, CFA, IUT, Écoles. Pas de sièges sociaux.
-3. PRÉCISION MÉTIER : Respecte strictement les mots-clés techniques fournis.
+RÈGLES D'OR (Non négociables) :
+1. LIEUX RÉELS : Trouve le CAMPUS exact (Lycée Agricole, CFA, MFR, IUT). INTERDICTION formelle de citer un siège social administratif.
+2. DISTINCTION DIPLÔME/HABILITATION :
+   - Un "Titre Pro", "CAP", "BTS", "Bac Pro" est un DIPLÔME (ou Certification RNCP).
+   - Un "CACES", "Habilitation électrique", "FIMO" est une HABILITATION.
+3. LOGIQUE GÉOGRAPHIQUE : Si l'utilisateur demande une ville, cherche DANS ou AUTOUR de cette ville (Rayon max 50-60km).
 
 FORMAT JSON STRICT :
 {
@@ -21,115 +23,117 @@ FORMAT JSON STRICT :
   "ville_reference": "string",
   "formations": [
     {
-      "intitule": "Nom complet",
-      "organisme": "Nom de l'école",
-      "rncp": "Code ou null",
+      "intitule": "Nom complet officiel (ex: BTSA Technico-Commercial)",
+      "organisme": "Nom de l'établissement formateur",
+      "rncp": "Code RNCP (ex: RNCP35801) ou 'Non renseigné'",
       "categorie": "Diplôme" | "Certification" | "Habilitation",
       "niveau": "3" | "4" | "5" | "6" | "N/A",
-      "ville": "Ville exacte du CAMPUS",
+      "ville": "Ville exacte du lieu de formation",
       "distance_km": number,
-      "site_web": "URL",
-      "modalite": "Présentiel" | "Apprentissage"
+      "site_web": "URL ou null",
+      "modalite": "Présentiel" | "Apprentissage" | "Mixte"
     }
   ]
 }`;
 
 Deno.serve(async (req: Request) => {
+  // GESTION CORS
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
     const { metier, ville, niveau } = await req.json();
-    if (!metier || !ville || !niveau) throw new Error("Paramètres manquants");
 
+    // Validation des entrées
+    if (!metier || !ville) throw new Error("Paramètres manquants: metier, ville");
+    
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    console.log(`🔎 Recherche V6 (Ultimate): ${metier} à ${ville}`);
+    console.log(`🚀 RECHERCHE OCAPIAT V7 (GOLD): ${metier} à ${ville} [Niv: ${niveau}]`);
 
-    // --- MAPPING DES 12 MÉTIERS OCAPIAT (VISION 360°) ---
+    // --- MAPPING INTELLIGENT DES 12 MÉTIERS (Logique Inclusive & Exclusive) ---
     let motsClesTechniques = "";
     let instructionsExclusion = ""; 
 
     const m = metier.toLowerCase();
 
-    // 1. FAMILLE SILO (Agent, Responsable, Conducteur silo)
+    // 1. FAMILLE SILO (Cœur de métier Ocapiat)
     if (m.includes("silo")) {
-        motsClesTechniques = "Bac Pro Agroéquipement, CQP Agent de silo, CS Maintenance des matériels, BTSA GDEA (Génie des Équipements Agricoles), CAP Agricole, Certificat de Spécialisation (CS) Stockage.";
-        instructionsExclusion = "EXCLURE : Cuisine, Métiers de bouche, BTP (Maçonnerie).";
+        motsClesTechniques = "Bac Pro Agroéquipement, CQP Agent de silo, CQP Conducteur de silo, CS Maintenance des matériels, BTSA GDEA, CAP Agricole (Métiers de l'agriculture), CS Responsable de silo.";
+        instructionsExclusion = "EXCLURE STRICTEMENT : Cuisine, Boulangerie, Maçonnerie, BTP, Architecture.";
     }
-    // 2. FAMILLE LOGISTIQUE (Magasinier, Cariste, Resp Logistique)
-    else if (m.includes("magasinier") || m.includes("cariste") || (m.includes("logistique") && !m.includes("responsable"))) {
-        // Niveau opérationnel
-        motsClesTechniques = "Titre Pro Agent Magasinier, Bac Pro Logistique, CACES R489 (1, 3, 5), CAP Opérateur Logistique.";
-        instructionsExclusion = "EXCLURE : Transport Routier (Conduite camion), Maintenance mécanique.";
-    }
+    // 2. FAMILLE LOGISTIQUE (Ops vs Manager)
     else if (m.includes("responsable logistique")) {
-        // Niveau encadrement
-        motsClesTechniques = "BUT QLIO (Qualité Logistique), TSMEL (Technicien Supérieur en Méthodes et Exploitation Logistique), Master Logistique, BTS GTLA.";
-        instructionsExclusion = "EXCLURE : CACES seul (ce n'est pas suffisant pour un responsable).";
+        motsClesTechniques = "BUT QLIO (Qualité Logistique), TSMEL (Technicien Supérieur Méthodes Exploitation Logistique), BTS GTLA, Master Supply Chain.";
+        instructionsExclusion = "EXCLURE : CACES seul, Simple magasinier, Chauffeur livreur.";
     }
-    // 3. FAMILLE MAINTENANCE (Responsable services techniques)
+    else if (m.includes("magasinier") || m.includes("cariste") || m.includes("logistique")) {
+        motsClesTechniques = "Titre Pro Agent Magasinier, Bac Pro Logistique, CACES R489 (Cat 1, 3, 5), CAP Opérateur Logistique, Titre Pro Préparateur de commandes.";
+        instructionsExclusion = "EXCLURE : Transport Routier (Conduite camion), Mécanique pure, Maintenance industrielle.";
+    }
+    // 3. FAMILLE MAINTENANCE (Services Techniques)
     else if (m.includes("services techniques") || m.includes("maintenance")) {
-        motsClesTechniques = "BTS Maintenance des Systèmes (MS), BUT Génie Industriel et Maintenance (GIM), BTS Électrotechnique, BTS CRSA, Bac Pro MSPC.";
-        instructionsExclusion = "EXCLURE : Logistique, Transport, Garage auto (VL).";
+        motsClesTechniques = "BTS Maintenance des Systèmes (MS - Option A/B), BUT GIM (Génie Industriel et Maintenance), BTS Électrotechnique, BTS CRSA (Automatisme), Bac Pro MSPC.";
+        instructionsExclusion = "EXCLURE : Logistique, Magasinage, Transport de marchandises, Garage automobile (Mécanique VL).";
     }
-    // 4. FAMILLE COMMERCE (Technico-co, Commercial Export)
-    else if (m.includes("technico") || (m.includes("commercial") && !m.includes("export"))) {
-        motsClesTechniques = "BTS CCST (Conseil et Commercialisation de Solutions Techniques), BTSA Technico-commercial (Agrofournitures), BTS NDRC, BUT TC.";
-        instructionsExclusion = "EXCLURE : Caisse, Vente en magasin de mode.";
-    }
+    // 4. FAMILLE COMMERCE (Technico vs Export)
     else if (m.includes("export")) {
-        motsClesTechniques = "BTS Commerce International (CI), BUT TC (Parcours International), Master Commerce International, Licence Pro Export.";
-        instructionsExclusion = "EXCLURE : Vente locale, Immobilier.";
+        motsClesTechniques = "BTS Commerce International (CI), BUT TC (Parcours Business International), Licence Pro Commerce International, Master Export.";
+        instructionsExclusion = "EXCLURE : Vente en boulangerie, Immobilier, Coiffure.";
     }
-    // 5. FAMILLE QUALITÉ (Contrôleur qualité, Agréeur)
-    else if (m.includes("contrôleur qualité") || m.includes("qualité")) {
-        motsClesTechniques = "BTSA Bioqualité (ex QIA), BUT Génie Biologique (IAB), Licence Pro Qualité Agroalimentaire, BTS QIABI.";
-        instructionsExclusion = "EXCLURE : Qualité aéronautique, Qualité automobile.";
+    else if (m.includes("technico") || m.includes("commercial")) {
+        // Le Graal : BTS CCST (ex BTS TC)
+        motsClesTechniques = "BTS CCST (Conseil et Commercialisation de Solutions Techniques), BTSA Technico-commercial (Vins/Jardins/Agrofournitures), BTS NDRC, BUT Techniques de Commercialisation.";
+        instructionsExclusion = "EXCLURE : Hôte de caisse, Vendeur prêt-à-porter, Esthétique.";
     }
+    // 5. FAMILLE QUALITÉ & AGRÉAGE
     else if (m.includes("agréeur") || m.includes("agréage")) {
-        // Métier très spécifique (grain)
-        motsClesTechniques = "CQP Agréeur, Formation classement des grains, BTSA Agronomie (Productions Végétales), CS Responsable de silo.";
-        instructionsExclusion = "EXCLURE : Agrément assurance, Immobilier.";
+        // Très spécifique Céréales
+        motsClesTechniques = "CQP Agréeur, Formation Classement des grains, BTSA Agronomie (Productions Végétales), CS Stockage de céréales.";
+        instructionsExclusion = "EXCLURE : Agrément assurance, Expert immobilier, Qualité aéronautique.";
     }
-    // 6. FAMILLE PRODUCTION (Conducteur de ligne)
+    else if (m.includes("qualité")) {
+        motsClesTechniques = "BTSA Bioqualité (ex QIA), BUT Génie Biologique (Parcours IAB), Licence Pro Qualité Agroalimentaire, BTS QIABI.";
+        instructionsExclusion = "EXCLURE : Qualité automobile, Qualité web, Développement informatique.";
+    }
+    // 6. FAMILLE PRODUCTION
     else if (m.includes("conducteur de ligne") || m.includes("ligne")) {
-        motsClesTechniques = "Pilote de ligne de production (PLP), CQP Conducteur de ligne, Bac Pro PSPA (Pilotage de systèmes), BTS Pilotage de procédés.";
-        instructionsExclusion = "EXCLURE : Conducteur de bus, Conducteur de train, Ligne électrique.";
+        motsClesTechniques = "Pilote de ligne de production (PLP), CQP Conducteur de ligne, Bac Pro PSPA, BTS Pilotage de procédés.";
+        instructionsExclusion = "EXCLURE : Conducteur de bus, Conducteur de train (SNCF), Ligne haute tension.";
     }
-    // 7. FAMILLE AGRONOMIE (Technicien culture, Chauffeur agricole)
+    // 7. FAMILLE AGRONOMIE & CONDUITE
     else if (m.includes("technicien culture") || m.includes("culture")) {
-        motsClesTechniques = "BTSA Agronomie et Productions Végétales (APV), BTSA ACSE, Licence Pro Agronomie, Ingénieur Agri.";
-        instructionsExclusion = "EXCLURE : Jardinerie, Paysagiste (Espaces verts), Culture (Art).";
+        motsClesTechniques = "BTSA Agronomie et Productions Végétales (APV), BTSA ACSE, Licence Pro Agronomie, Ingénieur Agri/Agro.";
+        instructionsExclusion = "EXCLURE : Paysagiste (Espaces verts - Aménagements), Culture artistique, Médiateur culturel.";
     }
     else if (m.includes("chauffeur")) {
-        // Cas délicat : Chauffeur agricole vs Routier
-        motsClesTechniques = "CAP Conducteur Routier Marchandises, Titre Pro Conducteur du transport routier (Porteur/Super Lourd), FIMO, CS Conduite de machines agricoles.";
-        instructionsExclusion = "EXCLURE : Chauffeur VTC, Taxi, Bus.";
+        motsClesTechniques = "CAP Conducteur Routier Marchandises, Titre Pro Conducteur du transport routier (Super Lourd), CS Conduite de machines agricoles, BPA Conducteur de machines.";
+        instructionsExclusion = "EXCLURE : Chauffeur VTC, Taxi, Ambulancier, Transport de voyageurs.";
     }
-    // FALLBACK (Sécurité)
+    // FALLBACK
     else {
-        motsClesTechniques = "Formations diplômantes du secteur agricole et alimentaire (OCAPIAT).";
+        motsClesTechniques = "Formations diplômantes reconnues par l'État (RNCP) dans le secteur agricole ou alimentaire.";
         instructionsExclusion = "";
     }
 
-    const userPrompt = `Trouve une liste complète (minimum 6-8 résultats) des formations pour "${metier}" à "${ville}" (Max 60km).
+    const userPrompt = `Recherche EXPERTE : Liste les formations pour devenir "${metier}" autour de "${ville}" (Rayon 50km).
     
-    DIPLÔMES CIBLES (Mots-clés prioritaires) : ${motsClesTechniques}
+    CIBLE TECHNIQUE (Mots-clés prioritaires) : ${motsClesTechniques}
     
-    ⛔ EXCLUSIONS STRICTES : ${instructionsExclusion}
+    ⛔ LISTE NOIRE (A NE PAS AFFICHER) : ${instructionsExclusion}
     
-    Filtre Niveau : ${niveau === 'all' ? 'Tout (CAP à Bac+5)' : 'Niveau ' + niveau}.
+    Filtre Niveau : ${niveau === 'all' ? 'Tout (du CAP au Bac+5)' : 'Niveau ' + niveau}.
 
-    INSTRUCTIONS :
-    1. Diversifie les organismes (Lycées, CFA, IUT, Écoles).
-    2. Vérifie la cohérence du métier (ex: Pas de logistique pour un poste de maintenance).
-    3. Indique la distance réelle et le RNCP.
+    INSTRUCTIONS POUR L'EXTRACTION :
+    1. Diversité : Cherche des Lycées Publics, des CFA, des MFR et des IUT.
+    2. Géographie : Sois précis sur la ville du campus. Indique la distance réelle.
+    3. Volume : Essaie de trouver entre 5 et 10 résultats pertinents.
     
-    Retourne uniquement le JSON.`;
+    Renvoie UNIQUEMENT le JSON validé.`;
 
+    // --- APPEL API PERPLEXITY (Mode Recherche Profonde) ---
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: {
@@ -137,45 +141,80 @@ Deno.serve(async (req: Request) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar-pro',
+        model: 'sonar-pro', // Le meilleur modèle pour la recherche
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userPrompt }
         ],
-        temperature: 0.1, 
+        temperature: 0.1, // Zéro créativité, 100% factualité
         max_tokens: 4000
       }),
     });
 
-    if (!perplexityResponse.ok) throw new Error(`Erreur Perplexity: ${perplexityResponse.status}`);
+    if (!perplexityResponse.ok) throw new Error(`Erreur API Perplexity: ${perplexityResponse.status}`);
 
     const perplexityData = await perplexityResponse.json();
     const content = perplexityData.choices[0].message.content;
 
+    // --- PARSING ROBUSTE ---
     let result;
     try {
+      // Nettoyage des balises markdown éventuelles
       const cleanContent = content.replace(/```json/g, '').replace(/```/g, '').trim();
       result = JSON.parse(cleanContent);
     } catch (e) {
-      console.warn("JSON fail, tentative regex");
+      console.warn("Parsing JSON direct échoué, tentative d'extraction Regex...");
       const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) result = JSON.parse(jsonMatch[0]);
-      else throw new Error("Impossible de parser le JSON");
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        console.error("Contenu brut reçu:", content);
+        throw new Error("L'IA n'a pas renvoyé de JSON valide.");
+      }
     }
 
-    if (result.formations) {
-      result.formations.sort((a: any, b: any) => (a.distance_km || 999) - (b.distance_km || 999));
+    // --- POST-TRAITEMENT DE SÉCURITÉ (LE "NIQUEL" FACTOR) ---
+    if (result.formations && Array.isArray(result.formations)) {
+      
+      const MAX_DISTANCE_KM = 65; // On laisse une petite marge (60km + 5km)
+
+      // 1. FILTRE DE SÉCURITÉ GÉOGRAPHIQUE
+      // On supprime impitoyablement tout ce qui est trop loin (Adieu Annemasse !)
+      result.formations = result.formations.filter((f: any) => {
+        const dist = f.distance_km;
+        // On garde si la distance est connue et inférieure à la limite
+        // Si distance est null/undefined, on garde par prudence (au cas où l'IA n'a pas su calculer)
+        if (typeof dist === 'number') {
+           return dist <= MAX_DISTANCE_KM;
+        }
+        return true; 
+      });
+
+      // 2. TRI PAR DISTANCE CROISSANTE
+      result.formations.sort((a: any, b: any) => {
+        const distA = a.distance_km || 999; // Les nulls vont à la fin
+        const distB = b.distance_km || 999;
+        return distA - distB;
+      });
+
+      // 3. NETTOYAGE DES NIVEAUX (Optionnel : Harmonisation)
+      // Parfois l'IA renvoie "Niveau 4", on veut juste "4"
+      result.formations.forEach((f: any) => {
+         if (f.niveau && typeof f.niveau === 'string' && f.niveau.includes('Niveau')) {
+             f.niveau = f.niveau.replace('Niveau ', '').trim();
+         }
+      });
     }
 
-    console.log(`✅ ${result.formations?.length || 0} formations trouvées`);
+    console.log(`✅ SUCCÈS : ${result.formations?.length || 0} formations qualifiées renvoyées.`);
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
   } catch (error: any) {
-    console.error('❌ Error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    console.error('❌ ERREUR CRITIQUE:', error);
+    return new Response(JSON.stringify({ error: error.message || "Erreur interne" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
