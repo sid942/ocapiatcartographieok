@@ -19,13 +19,17 @@ export interface Formation {
   intitule: string;
   organisme: string;
   rncp: string | null;
-  niveau: '4' | '5' | '6' | null;
+  // J'ai ajouté '3' (CAP) et 'N/A' (CACES/Permis)
+  niveau: '3' | '4' | '5' | '6' | 'N/A' | null; 
   ville: string;
   region: string;
   site_web: string | null;
   type: string;
   modalite: string | null;
-  distance_km?: number;
+  // Indispensable pour le tri géographique
+  distance_km?: number; 
+  // Nouveau champ pour savoir si c'est un diplôme ou une habilitation
+  categorie?: 'Diplôme' | 'Certification' | 'Habilitation (CACES/Permis)' | string;
   lat?: number;
   lon?: number;
 }
