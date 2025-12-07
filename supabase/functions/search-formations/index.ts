@@ -23,12 +23,12 @@ const RNCP_DB: Record<string, string> = {
 // --- CONFIG MÉTIERS ---
 const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> = {
     "technico": { 
-        diplomes: ["BTS CCST", "BTSA Technico-commercial", "BTS NDRC", "Licence Pro Technico-Commercial"],
+        diplomes: ["BTS CCST (ex-TC)", "BTSA Technico-commercial", "BTS NDRC", "Licence Pro Technico-Commercial"],
         contexte: "Lycées Agricoles, CFA CCIP, Écoles de Commerce."
     },
     "silo": {
         diplomes: ["Bac Pro Agroéquipement", "CQP Agent de silo", "BTSA GDEA", "CAP Maintenance des matériels", "Bac Pro CGEA"],
-        contexte: "Lycées Agricoles, CFPPA, MFR. (Focus Rural)."
+        contexte: "Lycées Agricoles, CFPPA, MFR."
     },
     "chauffeur": { 
         diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur transport", "CS Conduite machines agricoles"],
@@ -85,7 +85,7 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 function detecterMetier(input: string): string {
     const m = input.toLowerCase();
     if (m.match(/silo|grain/)) return m.includes("responsable") ? "responsable_silo" : "silo";
-    if (m.match(/culture|végétal|céréale/)) return "culture";
+    if (m.match(/culture|végétal|céréale|agronomie/)) return "culture";
     if (m.match(/chauffeur|conducteur|routier/)) return m.includes("ligne") ? "ligne" : "chauffeur";
     if (m.match(/maintenance|technique/)) return "maintenance";
     if (m.match(/logistique|supply/)) return m.includes("responsable") ? "logistique" : "magasinier";
@@ -122,17 +122,19 @@ Deno.serve(async (req: Request) => {
     const metierKey = detecterMetier(metier);
     const config = METIERS_CONFIG[metierKey];
     
+    // Stratégie géographique : Pour Fresnes/Paris, on force la périphérie pour les métiers Agri
     let zonePrompt = `${ville} (Rayon 50km)`;
     const isAgri = ["silo", "culture", "agreeur", "chauffeur", "responsable_silo"].includes(metierKey);
     const isBigCity = ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|fresnes|massy|creteil/);
-    if (isAgri && isBigCity) zonePrompt = "Départements limitrophes et zones rurales proches (max 60km)";
+    if (isAgri && isBigCity) zonePrompt = "Départements limitrophes (77, 78, 91, 95)";
 
     const systemPrompt = `Tu es un MOTEUR DE RECHERCHE D'ÉTABLISSEMENTS.
     Trouve les établissements réels. 
     JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "rncp": "", "modalite": "", "niveau": "" }] }`;
 
-    const userPrompt = `Liste les établissements pour : "${config.diplomes.join(", ")}" DANS LA ZONE : "${zonePrompt}".
-    CONTEXTE : ${config.contexte}. JSON uniquement.`;
+    const userPrompt = `Liste 15 établissements pour : "${config.diplomes.join(", ")}" DANS LA ZONE : "${zonePrompt}".
+    CONTEXTE : ${config.contexte}.
+    Pas de doublons. Donne la ville exacte. JSON uniquement.`;
 
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
@@ -148,49 +150,60 @@ Deno.serve(async (req: Request) => {
     if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
-    // --- 3. PARSING BLINDÉ (C'est ici que ça change) ---
+    // --- 3. PARSING ---
     let result;
-    const content = data.choices[0].message.content;
-    
     try {
-        // Extraction chirurgicale du JSON : On cherche le premier { et le dernier }
-        const firstOpen = content.indexOf('{');
-        const lastClose = content.lastIndexOf('}');
-        
-        if (firstOpen !== -1 && lastClose !== -1) {
-            const jsonString = content.substring(firstOpen, lastClose + 1);
-            result = JSON.parse(jsonString);
+        const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
+        const start = clean.indexOf('{');
+        const end = clean.lastIndexOf('}');
+        if(start !== -1 && end !== -1) {
+            result = JSON.parse(clean.substring(start, end + 1));
         } else {
-            throw new Error("Aucune structure JSON trouvée dans la réponse");
+            throw new Error("JSON introuvable");
         }
     } catch (e) {
-        console.error("CRITICAL PARSE ERROR:", content);
-        // Fallback vide pour éviter le crash complet de l'app
-        result = { formations: [] }; 
+        result = { formations: [] }; // Fallback vide pour éviter le crash
     }
 
-    // --- 4. VALIDATION & CORRECTION VIA API GOUV ---
+    // --- 4. VALIDATION HYBRIDE (C'est ici que ça change) ---
     if (result.formations && result.formations.length > 0) {
         const verificationPromises = result.formations.map(async (f: any) => {
             try {
-                const query = `${f.organisme} ${f.ville}`;
-                const apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=1`);
-                const apiData = await apiRep.json();
+                // TENTATIVE 1 : RECHERCHE EXACTE (Organisme + Ville)
+                let query = `${f.organisme} ${f.ville}`;
+                let apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=1`);
+                let apiData = await apiRep.json();
 
-                if (apiData.features?.length > 0) {
+                // TENTATIVE 2 : SAUVETAGE (Ville seule si organisme non trouvé)
+                if (!apiData.features || apiData.features.length === 0) {
+                    apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(f.ville)}&type=municipality&limit=1`);
+                    apiData = await apiRep.json();
+                }
+
+                if (apiData.features && apiData.features.length > 0) {
                     const feature = apiData.features[0];
-                    f.ville = feature.properties.city; 
+                    const realCoords = feature.geometry.coordinates; // [lon, lat]
+                    
+                    // On ne corrige le nom de la ville que si c'était une recherche précise
+                    // Sinon on garde le nom donné par l'IA mais on utilise les coords de la ville pour la distance
+                    
                     if (userLat !== 0) {
-                        f.distance_km = haversineDistance(userLat, userLon, feature.geometry.coordinates[1], feature.geometry.coordinates[0]);
-                    } else { f.distance_km = 999; }
-                } else { f.distance_km = 999; }
-            } catch (err) { f.distance_km = 999; }
+                        f.distance_km = haversineDistance(userLat, userLon, realCoords[1], realCoords[0]);
+                    } else { 
+                        f.distance_km = 999; 
+                    }
+                } else {
+                    f.distance_km = 999; // Adresse totalement inconnue
+                }
+            } catch (err) {
+                f.distance_km = 999;
+            }
             return f;
         });
 
         await Promise.all(verificationPromises);
 
-        // 5. FILTRAGE ET ENRICHISSEMENT
+        // 5. FILTRAGE
         const niveauCible = niveau === 'all' ? null : niveau.toString();
         const uniqueSet = new Set();
 
@@ -205,18 +218,19 @@ Deno.serve(async (req: Request) => {
             if (uniqueSet.has(key)) return false;
             uniqueSet.add(key);
 
+            // FILTRE DISTANCE (80km)
             return (f.distance_km || 999) <= 80;
         });
 
+        // ENRICHISSEMENT
         result.formations.forEach((f: any) => {
             const intituleUpper = f.intitule.toUpperCase();
-            
             if (intituleUpper.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR/)) f.categorie = "Diplôme";
             else if (intituleUpper.match(/CQP|CS /)) f.categorie = "Certification";
             else f.categorie = "Habilitation";
 
             const mode = (f.modalite || "").toLowerCase();
-            if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro")) {
+            if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro") || mode.includes("mixte")) {
                 f.alternance = "Oui"; f.modalite = "Alternance";
             } else {
                 f.alternance = "Non"; f.modalite = "Initial";
@@ -231,7 +245,6 @@ Deno.serve(async (req: Request) => {
 
         result.formations.sort((a: any, b: any) => a.distance_km - b.distance_km);
     } else {
-        // Sécurité si result.formations est vide ou undefined
         result.formations = [];
     }
 
@@ -241,7 +254,7 @@ Deno.serve(async (req: Request) => {
         formations: result.formations || []
     };
 
-    console.log(`✅ V26 FINAL: ${finalResponse.formations.length} résultats.`);
+    console.log(`✅ V27 RESCUE: ${finalResponse.formations.length} résultats.`);
 
     return new Response(JSON.stringify(finalResponse), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
