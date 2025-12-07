@@ -6,15 +6,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// --- SYSTEM PROMPT V10 (MODE SNIPER / ADRESSE PRÉCISE) ---
-const SYSTEM_PROMPT = `Tu es un MOTEUR DE RECHERCHE de formations (type Parcoursup/Onisep).
-Ta mission est de fournir des résultats UNITAIRES et PRÉCIS.
+// --- SYSTEM PROMPT V12 (MODE ANNUAIRE STRICT) ---
+const SYSTEM_PROMPT = `Tu es un MOTEUR DE RECHERCHE D'ÉTABLISSEMENTS (type ONISEP).
+Ta mission : Lister des ÉTABLISSEMENTS PHYSIQUES PRÉCIS (Nom + Ville) pour les métiers demandés.
 
-RÈGLES D'OR (CRITIQUES) :
-1. INTERDICTION DU PLURIEL : Ne réponds jamais "Les lycées agricoles de la région". Tu dois citer "Lycée Agricole de Bougainville", puis une autre ligne pour "Lycée Agricole Sully".
-2. UNE LIGNE = UNE ÉCOLE : Si une formation existe dans 3 écoles, tu dois générer 3 objets JSON distincts.
-3. ADRESSE RÉELLE : Le champ "ville" doit contenir UNIQUEMENT le nom de la commune (ex: "Brie-Comte-Robert"). Pas de phrases comme "Secteurs ruraux".
-4. NOM PROPRE : Le champ "organisme" doit être le nom officiel de l'établissement (ex: "CFA UTEC"). Pas de "Centres habilités".
+RÈGLES D'OR ABSOLUES :
+1. INTERDICTION DU PLURIEL : Ne réponds JAMAIS "Les lycées agricoles". Une ligne = Un établissement précis (ex: "Lycée Agricole de Bougainville").
+2. ADRESSE RÉELLE : Le champ "ville" doit être une COMMUNE existante.
+3. NOM PROPRE : Le champ "organisme" doit être le nom officiel.
+4. PAS D'INVENTION : Si tu ne trouves pas d'école exacte pour ce diplôme dans cette ville, ne l'invente pas.
 
 FORMAT JSON STRICT :
 {
@@ -22,12 +22,12 @@ FORMAT JSON STRICT :
   "ville_reference": "string",
   "formations": [
     {
-      "intitule": "Nom exact du diplôme",
-      "organisme": "Nom PRÉCIS de l'établissement (Pas de nom générique)",
+      "intitule": "Intitulé exact du diplôme",
+      "organisme": "Nom PROPRE de l'établissement",
       "rncp": "Code RNCP ou 'Non renseigné'",
       "categorie": "Diplôme" | "Certification" | "Habilitation",
       "niveau": "3" | "4" | "5" | "6" | "N/A",
-      "ville": "Ville exacte (Nom de la commune)",
+      "ville": "Commune exacte",
       "distance_km": number,
       "site_web": "URL ou null",
       "modalite": "Présentiel" | "Apprentissage"
@@ -36,99 +36,79 @@ FORMAT JSON STRICT :
 }`;
 
 Deno.serve(async (req: Request) => {
+  // 1. Gestion CORS
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
 
   try {
     const { metier, ville, niveau } = await req.json();
-    if (!metier || !ville) throw new Error("Paramètres manquants");
+    
+    // 2. Validation Entrées
+    if (!metier || !ville) {
+        return new Response(JSON.stringify({ error: "Paramètres manquants" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityApiKey) throw new Error("Clé API Perplexity manquante");
 
-    console.log(`🎯 RECHERCHE V10 (SNIPER): ${metier} autour de ${ville}`);
+    console.log(`🛡️ RECHERCHE V12 (BLINDÉE): ${metier} [${niveau}] à ${ville}`);
 
-    // --- 1. GESTION GÉOGRAPHIQUE ---
+    // --- 3. LOGIQUE GÉOGRAPHIQUE ---
     let zoneRecherche = ville;
-    const grandesVilles = ["paris", "lyon", "marseille", "bordeaux", "lille", "toulouse", "nantes"];
-    const estMetierAgricole = metier.toLowerCase().match(/silo|culture|agri|chauffeur|agréeur/);
+    const grandesVilles = ["paris", "lyon", "marseille", "bordeaux", "lille", "toulouse", "nantes", "strasbourg"];
+    const estMetierAgricole = metier.toLowerCase().match(/silo|culture|agri|chauffeur|agréeur|conduite|ligne/);
 
     if (estMetierAgricole && grandesVilles.some(v => ville.toLowerCase().includes(v))) {
-         if (ville.toLowerCase().includes("paris")) zoneRecherche = "Île-de-France (Seine-et-Marne 77, Yvelines 78, Essonne 91, Val-d'Oise 95)";
-         else zoneRecherche = `${ville} et sa périphérie (50km)`;
+         if (ville.toLowerCase().includes("paris")) zoneRecherche = "Grande Couronne Île-de-France (77, 78, 91, 95)";
+         else zoneRecherche = `${ville} et sa périphérie rurale (rayon 50km)`;
     }
 
-    // --- 2. MAPPING INTELLIGENT (Inchangé car parfait) ---
-    let motsCles = "";
-    let exclusions = "";
+    // --- 4. DÉFINITION CIBLES MÉTIERS ---
+    let diplomesCibles = "";
+    let contexteMetier = "";
     const m = metier.toLowerCase();
 
-    // SILO
+    // Mapping Métier (Simplifié pour la lisibilité, mais complet)
     if (m.includes("silo")) {
-        motsCles = `
-        Cherche spécifiquement ces établissements :
-        - Lycée Agricole Bougainville (Brie-Comte-Robert)
-        - Lycée Agricole de Saint-Germain-en-Laye
-        - Lycée Agricole La Bretonnière (Chailly-en-Brie)
-        - Lycée Le Champ de Claye (Claye-Souilly)
-        Cherche les formations : Bac Pro Agroéquipement, CQP Agent de silo, Bac Pro MSPC (Maintenance).
-        `;
-        exclusions = "EXCLURE : Termes génériques comme 'Lycées agricoles', 'Centres de formation'.";
-    }
-    // MAINTENANCE
-    else if (m.includes("services techniques") || (m.includes("maintenance") && !m.includes("agri"))) {
-        motsCles = "Cherche les Lycées Pros et CFA précis proposant : BTS Maintenance des Systèmes (MS), BUT GIM, Bac Pro MSPC, BTS Électrotechnique.";
-        exclusions = "EXCLURE : Garages auto.";
-    }
-    // LOGISTIQUE
-    else if (m.includes("responsable logistique")) {
-        motsCles = "BUT QLIO, TSMEL (Aftral, Promotrans), BTS GTLA.";
-        exclusions = "";
-    }
-    else if (m.includes("magasinier") || m.includes("cariste") || m.includes("logistique")) {
-        motsCles = "Titre Pro Agent Magasinier (AFPA, Promotrans, Aftral, Forget Formation), Bac Pro Logistique, CACES R489.";
-        exclusions = "";
-    }
-    // COMMERCE
-    else if (m.includes("technico") || (m.includes("commercial") && !m.includes("export"))) {
-        motsCles = "BTS CCST (ex-TC), BTSA Technico-commercial (Lycée Bougainville, Tecomah), BTS NDRC.";
-        exclusions = "";
-    }
-    else if (m.includes("export")) {
-        motsCles = "BTS Commerce International (CI), BUT TC.";
-        exclusions = "";
-    }
-    // QUALITÉ
-    else if (m.includes("agréeur") || m.includes("contrôleur qualité") || m.includes("qualité")) {
-        motsCles = "BTSA Bioqualité, BUT Génie Biologique, CQP Agréeur, Formation grains.";
-        exclusions = "";
-    }
-    // PROD & AGRI
-    else if (m.includes("conducteur de ligne") || m.includes("ligne")) {
-        motsCles = "Pilote de ligne de production, CQP Conducteur, Bac Pro PSPA.";
-        exclusions = "";
-    }
-    else if (m.includes("technicien culture") || m.includes("culture") || m.includes("chauffeur")) {
-        motsCles = "BTSA APV, BTSA ACSE, CAP Conducteur Routier, CS Conduite machines.";
-        exclusions = "";
-    }
-    else {
-        motsCles = "Formations diplômantes précises (Nom de l'école obligatoire).";
+        diplomesCibles = "Bac Pro Agroéquipement, CQP Agent de silo, BTSA GDEA, CAP Maintenance des matériels.";
+        contexteMetier = "Cible : Lycées Agricoles (EPLEFPA), CFA Agricoles, MFR.";
+    } else if (m.includes("maintenance") || m.includes("services techniques")) {
+        diplomesCibles = "BTS Maintenance des Systèmes (MS), BUT GIM, Bac Pro MSPC.";
+        contexteMetier = "Cible : Lycées Pros Industriels, CFAI.";
+    } else if (m.includes("logistique") || m.includes("magasinier")) {
+        diplomesCibles = "Titre Pro Agent Magasinier, Bac Pro Logistique, CACES R489.";
+        contexteMetier = "Cible : AFPA, Aftral, Promotrans, Lycées Pros.";
+    } else if (m.includes("commercial") || m.includes("technico")) {
+        diplomesCibles = "BTS CCST (ex-TC), BTSA Technico-commercial.";
+        contexteMetier = "Cible : Lycées Agricoles (pour le BTSA) et CFA Commerciaux.";
+    } else if (m.includes("qualité") || m.includes("agréeur")) {
+        diplomesCibles = "BTSA Bioqualité, BUT Génie Biologique, CQP Agréeur.";
+        contexteMetier = "Cible : ENIL, IUT, CFPPA.";
+    } else if (m.includes("conducteur de ligne")) {
+        diplomesCibles = "Pilote de ligne de production, Bac Pro PSPA.";
+        contexteMetier = "Cible : CFAI, Lycées Pros.";
+    } else if (m.includes("culture") || m.includes("chauffeur")) {
+        diplomesCibles = "BTSA APV, BTSA ACSE, CAP Conducteur Routier.";
+        contexteMetier = "Cible : Lycées Agricoles, Centres de formation Transport.";
+    } else {
+        diplomesCibles = "Formations diplômantes RNCP officielles.";
+        contexteMetier = "Cible : Établissements reconnus.";
     }
 
-    const userPrompt = `Liste 8 formations CONCRÈTES pour "${metier}" dans la zone "${zoneRecherche}".
+    const userPrompt = `Liste 8 établissements PRÉCIS pour "${diplomesCibles}" dans la zone "${zoneRecherche}".
     
-    CIBLE : ${motsCles}
+    CONTEXTE : ${contexteMetier}
     
-    ⛔ INTERDIT : ${exclusions}
-    ⛔ INTERDIT : Ne réponds JAMAIS par des catégories ("Les lycées..."). Je veux des NOMS PROPRES ("Lycée Jean Moulin").
+    ⛔ INTERDICTIONS :
+    - Pas de noms génériques ("Les lycées...").
+    - Pas de villes floues ("Secteur 77").
+    - Pas de sièges sociaux.
     
-    Pour chaque résultat, donne :
-    - Organisme : Le VRAI nom de l'école/CFA.
-    - Ville : La VRAIE ville (Code postal si possible).
-    - Distance : Estime la distance depuis le centre de la zone demandée.
+    Donne-moi : Organisme (Nom Propre), Ville (Commune), Distance (Estimée), Niveau (3,4,5,6).
     
+    Force les champs "metier_normalise" à "${metier}" et "ville_reference" à "${ville}".
     Renvoie le JSON uniquement.`;
 
+    // --- 5. APPEL PERPLEXITY ---
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${perplexityApiKey}`, 'Content-Type': 'application/json' },
@@ -140,9 +120,10 @@ Deno.serve(async (req: Request) => {
       }),
     });
 
-    if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
+    if (!perplexityResponse.ok) throw new Error(`Erreur API Perplexity: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
+    // --- 6. PARSING JSON ---
     let result;
     try {
         const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -150,29 +131,49 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
         const match = data.choices[0].message.content.match(/\{[\s\S]*\}/);
         if (match) result = JSON.parse(match[0]);
-        else throw new Error("Erreur JSON IA");
+        else throw new Error("Erreur de parsing JSON IA");
     }
 
+    // --- 7. FILTRAGE STRICT CÔTÉ CODE (Réponse à ChatGPT) ---
     if (result.formations) {
+        // Normalisation du niveau demandé par l'utilisateur
+        const niveauCible = niveau === 'all' ? null : niveau.toString();
+
         result.formations = result.formations.filter((f: any) => {
-            // Filtre de sécurité : On vire les noms génériques détectés
+            // A. Nettoyage des niveaux dans le JSON reçu
+            let nivFormation = f.niveau ? f.niveau.toString().replace('Niveau ', '').trim() : 'N/A';
+            f.niveau = nivFormation; // On met à jour l'objet
+
+            // B. Filtre Niveau Strict (Si l'user veut Niv 4, on vire Niv 5)
+            if (niveauCible && nivFormation !== 'N/A' && nivFormation !== niveauCible) {
+                // Petite souplesse : Si on veut 4, on accepte pas 5. Mais si niveau est N/A (CQP), on garde.
+                return false;
+            }
+
+            // C. Filtre Anti-Flou (Nom d'organisme ou ville générique)
             const org = f.organisme.toLowerCase();
-            const ville = f.ville.toLowerCase();
-            if (org.includes("lycées agricoles") || org.includes("centres habilités") || ville.includes("secteurs")) return false;
-            
-            // Règle Distance (Large pour la campagne)
-            return (f.distance_km || 0) <= 80;
+            const villeF = f.ville.toLowerCase();
+            const termesInterdits = ["lycées", "centres", "réseau", "structures", "organismes", "plusieurs", "divers"];
+            const villesInterdites = ["secteur", "zone", "départements", "proximité", "alentours"];
+
+            const estFlou = termesInterdits.some(t => org.includes(t) && !org.startsWith("lycée polyvalent"));
+            const estVilleFloue = villesInterdites.some(v => villeF.includes(v));
+
+            if (estFlou || estVilleFloue) return false;
+
+            // D. Filtre Distance de Sécurité (Max 90km)
+            return (f.distance_km || 0) <= 90;
         });
 
+        // Tri
         result.formations.sort((a: any, b: any) => (a.distance_km || 999) - (b.distance_km || 999));
-        
-        // Nettoyage esthétique
-        result.formations.forEach((f:any) => {
-            if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '');
-        });
     }
 
-    console.log(`✅ ${result.formations?.length || 0} résultats PRÉCIS trouvés.`);
+    // Sécurisation des champs obligatoires pour le Front
+    if (!result.metier_normalise) result.metier_normalise = metier;
+    if (!result.ville_reference) result.ville_reference = ville;
+
+    console.log(`✅ ${result.formations?.length || 0} résultats VALIDÉS renvoyés.`);
 
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
