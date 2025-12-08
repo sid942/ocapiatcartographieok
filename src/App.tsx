@@ -184,3 +184,36 @@ function App() {
         {/* Overlay chargement sur la carte aussi */}
         {isLoading && (
           <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-30 flex items-center justify-center">
+             {/* Le loader est déjà à gauche, on laisse juste le flou ici pour l'effet */}
+          </div>
+        )}
+
+        {/* Légende Carte Flottante */}
+        <div className="absolute top-4 right-4 bg-white/90 backdrop-blur rounded-lg shadow-md px-3 py-2 z-10 border border-gray-200">
+          <div className="flex gap-3 text-[10px] font-medium text-gray-600">
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-purple-500"></div>
+              <span>CAP (N3)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
+              <span>Bac (N4)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div>
+              <span>Sup (N5+)</span>
+            </div>
+          </div>
+        </div>
+
+        <FormationMap
+          ref={mapRef}
+          formations={formations}
+          onFormationClick={handleFormationClick}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default App;
