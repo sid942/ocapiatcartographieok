@@ -7,45 +7,28 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. MAPPING MÉTIER -> CODES ROME (CORRIGÉ POUR ÉVITER LES INGÉNIEURS)
+// 1. CONFIGURATION DES REQUETES (STRATÉGIE MIXTE)
 // ==================================================================================
-const METIER_TO_ROME: Record<string, string[]> = {
-    // TECHNICO : Vente technique
+
+// Pour la plupart des métiers, on cherche tout d'un coup
+const METIER_TO_ROME_SIMPLE: Record<string, string[]> = {
     "technico": ["D1407", "D1402", "D1403"], 
-    
-    // SILO (CORRIGÉ) : On vise l'Ouvrier (Conduite) et le Technicien (Méca)
-    // J'ai retiré les codes de management qui amenaient les ingénieurs
-    "silo": ["A1416", "A1101", "I1304", "I1309"], 
-    
-    // CHAUFFEUR : Transport routier + Conduite agri
     "chauffeur": ["N4101", "N4105", "A1101"], 
-    
-    // RESPONSABLE SILO : Ici on garde le management (Ingénieurs bienvenus)
     "responsable_silo": ["A1301", "A1303", "I1102"], 
-    
-    // LOGISTIQUE
     "logistique": ["N1301", "N1302"], 
-    
-    // MAGASINIER
     "magasinier": ["N1103", "N1105"], 
-    
-    // MAINTENANCE
     "maintenance": ["I1304", "I1309", "I1602"], 
-    
-    // QUALITÉ
     "qualite": ["H1502", "H1206"], 
-    
-    // AGRÉEUR
     "agreeur": ["H1502", "D1101"], 
-    
-    // LIGNE
     "ligne": ["H2102", "H2903"], 
-    
-    // CULTURE
     "culture": ["A1301", "A1302"], 
-    
-    // EXPORT
     "export": ["D1401", "D1402"] 
+};
+
+// Pour "Silo", on sépare pour éviter que l'industrie n'écrase l'agricole
+const SILO_STRATEGY = {
+    agri: ["A1416", "A1101"], // Conduite engins agri, Silo (On cherchera LOIN)
+    tech: ["I1304", "I1309"]  // Maintenance industrielle (On cherchera PRÈS)
 };
 
 function detecterMetierKey(input: string): string {
@@ -63,6 +46,15 @@ function detecterMetierKey(input: string): string {
     return "technico"; 
 }
 
+// Fonction helper pour appeler l'API LBA
+async function fetchLBA(romes: string[], lat: number, lon: number, radius: number) {
+    const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=${radius}&caller=ocapiat_app`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.results || [];
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
 
@@ -70,10 +62,9 @@ Deno.serve(async (req: Request) => {
     const { metier, ville } = await req.json();
     if (!metier || !ville) throw new Error("Paramètres manquants");
 
-    // 1. GÉOCODAGE (API Gouv - Gratuit)
+    // 1. GÉOCODAGE
     let lat = 0, lon = 0;
     let villeRef = ville;
-    
     const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
     const geoData = await geoRep.json();
     
@@ -83,48 +74,53 @@ Deno.serve(async (req: Request) => {
         lat = f.geometry.coordinates[1];
         villeRef = `${f.properties.city} (${f.properties.postcode})`;
     } else {
-        throw new Error("Ville introuvable. Vérifiez l'orthographe.");
+        throw new Error("Ville introuvable.");
     }
 
-    // 2. APPEL FRANCE TRAVAIL (La Bonne Alternance - Gratuit)
+    // 2. EXÉCUTION DE LA RECHERCHE (Stratégie Double ou Simple)
     const metierKey = detecterMetierKey(metier);
-    const romes = METIER_TO_ROME[metierKey];
-    
-    // On appelle l'API officielle
-    const radius = 60; // 60km c'est raisonnable
-    const lbaUrl = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=${radius}&caller=ocapiat_app`;
+    let rawResults: any[] = [];
 
-    const lbaRep = await fetch(lbaUrl);
-    if (!lbaRep.ok) throw new Error("Service formation indisponible momentanément");
-    
-    const lbaData = await lbaRep.json();
-    const rawResults = lbaData.results || [];
+    if (metierKey === "silo") {
+        // --- STRATÉGIE "SILO" DOUBLE DÉTENTE ---
+        console.log("🚜 Mode Silo activé : Agri étendu + Tech local");
+        
+        // Requête 1 : Agri (Loin - 150km) pour choper Bougainville, etc.
+        const resultsAgri = await fetchLBA(SILO_STRATEGY.agri, lat, lon, 150);
+        
+        // Requête 2 : Tech (Près - 30km) pour les Lycées Pros du coin
+        const resultsTech = await fetchLBA(SILO_STRATEGY.tech, lat, lon, 30);
+        
+        // Fusion (L'agri en premier dans la liste brute avant le tri final)
+        rawResults = [...resultsAgri, ...resultsTech];
+    } else {
+        // --- STRATÉGIE CLASSIQUE ---
+        const romes = METIER_TO_ROME_SIMPLE[metierKey] || METIER_TO_ROME_SIMPLE["technico"];
+        rawResults = await fetchLBA(romes, lat, lon, 100);
+    }
 
-    // 3. NETTOYAGE
-    const formations = rawResults.map((item: any) => {
+    // 3. NETTOYAGE & DÉDOUBLONNAGE
+    const processedFormations = rawResults.map((item: any) => {
+        // Niveau
         let niveau = "N/A";
         const title = (item.title || "").toUpperCase();
-        
-        // Déduction propre du niveau
         if (title.includes("CAP") || title.includes("TITRE PRO NIVEAU 3")) niveau = "3";
         else if (title.includes("BAC") || title.includes("BP") || title.includes("NIVEAU 4")) niveau = "4";
         else if (title.includes("BTS") || title.includes("DEUST") || title.includes("NIVEAU 5")) niveau = "5";
         else if (title.includes("BUT") || title.includes("LICENCE") || title.includes("BACHELOR") || title.includes("NIVEAU 6")) niveau = "6";
         else if (title.includes("MASTER") || title.includes("INGÉNIEUR")) niveau = "6"; 
 
-        // Extraction distance réelle
         const dist = item.place?.distance ? Math.round(item.place.distance) : 999;
-
-        // Code RNCP
         const rncpCode = item.rncpCode || (item.rncpLabel ? "RNCP Disponible" : "Non renseigné");
 
         return {
+            id: item.id || Math.random().toString(), // Pour dédoublonner
             intitule: item.title || "Formation",
             organisme: item.company?.name || "Organisme de formation",
             ville: item.place?.city || "",
             rncp: rncpCode,
             niveau: niveau,
-            modalite: "Alternance", 
+            modalite: "Alternance",
             alternance: "Oui",
             categorie: title.includes("TITRE") ? "Certification" : "Diplôme",
             distance_km: dist,
@@ -132,11 +128,17 @@ Deno.serve(async (req: Request) => {
         };
     });
 
-    // Tri par distance
-    formations.sort((a: any, b: any) => a.distance_km - b.distance_km);
+    // Dédoublonnage (Important car on fusionne 2 listes pour Silo)
+    const uniqueFormations = processedFormations.filter((v, i, a) => 
+        a.findIndex(t => (t.intitule === v.intitule && t.organisme === v.organisme)) === i
+    );
 
-    // On garde les 20 plus proches
-    const finalFormations = formations.slice(0, 20);
+    // Tri intelligent : On garde le tri par distance, MAIS les Agri (radius 150) seront présents
+    // Si on veut forcer l'Agri en haut, on pourrait trier par catégorie, mais la distance reste le plus pertinent pour l'utilisateur.
+    // Le fait d'avoir restreint la Tech à 30km évite qu'elle pollue tout l'écran.
+    uniqueFormations.sort((a: any, b: any) => a.distance_km - b.distance_km);
+
+    const finalFormations = uniqueFormations.slice(0, 20);
 
     return new Response(JSON.stringify({
         metier_normalise: metier,
