@@ -4,7 +4,7 @@ import { SearchForm } from './components/SearchForm';
 import { FormationMap, FormationMapRef } from './components/FormationMap';
 import { FormationList } from './components/FormationList';
 import { Formation, Metier } from './types';
-import { searchFormations } from './service/perplexity'; // Vérifie si c'est 'service' ou 'services'
+import { searchFormations } from './services/perplexity';
 import { geocodeCity } from './services/nominatim';
 
 function App() {
