@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. DATA RNCP (POUR ÊTRE CARRÉ AVEC OCAPIAT)
+// 1. DATA RNCP
 // ==================================================================================
 const RNCP_DB: Record<string, string> = {
     "AGROÉQUIPEMENT": "RNCP38234", "AGENT DE SILO": "RNCP28779", "GDEA": "RNCP38243",
@@ -24,24 +24,60 @@ const RNCP_DB: Record<string, string> = {
 };
 
 // ==================================================================================
-// 2. CONFIG MÉTIERS (AIDE À LA DÉCISION)
+// 2. CONFIG MÉTIERS
 // ==================================================================================
-const METIERS_CONFIG: Record<string, { contexte: string }> = {
-    technico: { contexte: "Lycées Agricoles, CFA, Écoles de Commerce." },
-    silo: { contexte: "Lycées Agricoles, CFPPA, MFR." },
-    chauffeur: { contexte: "Aftral, Promotrans, CFPPA, Lycées Agricoles." },
-    responsable_silo: { contexte: "Écoles d'ingénieurs (ISARA, ESA...), Universités, CFPPA." },
-    logistique: { contexte: "IUT, Aftral, Promotrans, Universités, IAE." },
-    magasinier: { contexte: "AFPA, Aftral, Promotrans, Lycées Pros." },
-    maintenance: { contexte: "Lycées Pros, CFAI, IUT." },
-    qualite: { contexte: "ENIL, IUT, Lycées Agricoles." },
-    agreeur: { contexte: "CFPPA Céréaliers." },
-    ligne: { contexte: "CFAI, Lycées Pros." },
-    culture: { contexte: "Lycées Agricoles, CFAA." },
-    export: { contexte: "Lycées, IUT, Business Schools." }
+const METIERS_CONFIG: Record<string, { diplomes: string[], contexte: string }> = {
+    technico: { 
+        diplomes: ["BTS CCST", "BTSA Technico-commercial", "BTS NDRC", "Licence Pro Technico-Commercial"],
+        contexte: "Lycées Agricoles, CFA CCIP, Écoles de Commerce."
+    },
+    silo: { 
+        diplomes: ["Bac Pro Agroéquipement", "CQP Agent de silo", "BTSA GDEA", "CAP Maintenance des matériels", "Bac Pro CGEA"],
+        contexte: "Lycées Agricoles, CFPPA, MFR."
+    },
+    chauffeur: { 
+        diplomes: ["CAP Conducteur Routier", "Titre Pro Conducteur transport", "CS Conduite machines agricoles"],
+        contexte: "Aftral, Promotrans, Lycées Agricoles."
+    },
+    responsable_silo: { 
+        diplomes: ["CS Responsable de silo", "Ingénieur Agronome", "Master Management Agroalimentaire", "BTSA GDEA"],
+        contexte: "Écoles d'ingénieurs (ISARA, AgroParisTech...), Universités, CFPPA."
+    },
+    logistique: { 
+        diplomes: ["BUT QLIO", "TSMEL", "BTS GTLA", "Master Logistique"],
+        contexte: "IUT, Aftral, Promotrans, Universités."
+    },
+    magasinier: { 
+        diplomes: ["Titre Pro Agent Magasinier", "Bac Pro Logistique", "CACES R489"],
+        contexte: "AFPA, Aftral, Promotrans, Lycées Pros."
+    },
+    maintenance: { 
+        diplomes: ["BTS Maintenance des Systèmes", "BUT GIM", "Bac Pro MSPC"],
+        contexte: "Lycées Pros Industriels, CFAI, IUT."
+    },
+    qualite: { 
+        diplomes: ["BTSA Bioqualité", "BUT Génie Biologique", "Licence Pro Qualité"],
+        contexte: "ENIL, IUT, Lycées Agricoles."
+    },
+    agreeur: { 
+        diplomes: ["CQP Agréeur", "Formation Classement des grains", "CS Stockage"],
+        contexte: "CFPPA Céréaliers, Organismes de la branche."
+    },
+    ligne: { 
+        diplomes: ["Pilote de ligne de production", "Bac Pro PSPA", "CQP Conducteur de ligne"],
+        contexte: "CFAI, Lycées Pros Industriels."
+    },
+    culture: { 
+        diplomes: ["BTSA APV", "BTSA ACSE", "Ingénieur Agri"],
+        contexte: "Lycées Agricoles, CFAA."
+    },
+    export: { 
+        diplomes: ["BTS Commerce International", "BUT TC (International)", "Master Commerce International"],
+        contexte: "Lycées, IUT, Business Schools."
+    }
 };
 
-// --- OUTILS MATHÉMATIQUES (POUR NE PAS MENTIR SUR LA DISTANCE) ---
+// --- OUTILS ---
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -55,9 +91,9 @@ function detecterMetier(input: string): string {
     const m = input.toLowerCase();
     if (m.match(/silo|grain/)) return m.includes("responsable") ? "responsable_silo" : "silo";
     if (m.match(/culture|végétal|céréale|agronomie/)) return "culture";
-    if (m.match(/chauffeur|conducteur|routier/)) return "chauffeur";
+    if (m.match(/chauffeur|conducteur|routier/)) return m.includes("ligne") ? "ligne" : "chauffeur";
     if (m.match(/maintenance|technique/)) return "maintenance";
-    if (m.match(/logistique|supply/)) return "logistique";
+    if (m.match(/logistique|supply/)) return m.includes("responsable") ? "logistique" : "magasinier";
     if (m.match(/magasinier|cariste/)) return "magasinier";
     if (m.match(/commercial|technico/)) return m.includes("export") ? "export" : "technico";
     if (m.match(/qualité|contrôle/)) return "qualite";
@@ -78,49 +114,59 @@ Deno.serve(async (req: Request) => {
 
     // 1. API GOUV (GPS UTILISATEUR)
     let userLat = 0, userLon = 0;
+    let villeNomOfficiel = ville;
+    let villeContext = "";
+
     try {
+        // On cherche la ville. Si c'est "Fresnes", l'API Gouv va sortir celle du 94 en premier car plus peuplée.
         const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
         const geoData = await geoRep.json();
         if (geoData.features?.length > 0) {
-            const coords = geoData.features[0].geometry.coordinates;
-            userLon = coords[0]; userLat = coords[1];
+            const f = geoData.features[0];
+            userLon = f.geometry.coordinates[0]; 
+            userLat = f.geometry.coordinates[1];
+            villeNomOfficiel = f.properties.city; // ex: "Fresnes"
+            const postcode = f.properties.postcode; // ex: "94260"
+            const context = f.properties.context; // ex: "94, Val-de-Marne, Île-de-France"
+            villeContext = `${villeNomOfficiel} (${context})`; // On verrouille le contexte
+            console.log(`📍 User localisé : ${villeContext}`);
         }
-    } catch {}
+    } catch { villeContext = ville; }
 
-    // 2. CONFIG & ZONE
+    // 2. CONFIG IA
     const metierKey = detecterMetier(metier);
     const config = METIERS_CONFIG[metierKey];
     
-    // Stratégie géographique : Si rural + grande ville = on pousse vers la sortie
-    let zonePrompt = `${ville} et sa région (Rayon 50km)`;
-    const isRuralOnly = ["silo", "culture", "agreeur", "chauffeur"].includes(metierKey);
-    const isBigCity = ville.toLowerCase().match(/paris|lyon|marseille|lille|bordeaux|nantes|fresnes|massy|creteil|toulouse/);
+    // 3. CONSTRUCTION DE LA ZONE (C'est ici qu'on avait le bug "Lost Anchor")
+    let zonePrompt = "";
     
-    if (isRuralOnly && isBigCity) {
-         zonePrompt = "Périphérie rurale et départements limitrophes (max 80km)";
+    const isRuralOnly = ["silo", "culture", "agreeur", "chauffeur"].includes(metierKey);
+    // Détection IDF basée sur le code postal (91, 92, 93, 94, 95, 75, 77, 78) ou les noms
+    const isIDF = villeContext.match(/9[1-5]|7[578]|paris|fresnes|creteil|massy|cergy/i);
+    
+    if (isRuralOnly) {
+        if (isIDF) {
+            // Si on est en IDF pour un métier rural -> On force la grande couronne AVEC le nom de la ville de départ
+            zonePrompt = `Périphérie de ${villeContext} (Focus sur Seine-et-Marne 77, Yvelines 78, Essonne 91)`;
+        } else {
+            // Sinon -> Périphérie classique
+            zonePrompt = `Périphérie rurale de ${villeContext} (Rayon 50km)`;
+        }
+    } else if (metierKey === "responsable_silo") {
+        zonePrompt = `${villeContext} et sa région (Intra-muros + Périphérie)`;
+    } else {
+        zonePrompt = `${villeContext} (Rayon 30km)`;
     }
 
-    // ==================================================================================
-    // 3. LE PROMPT "CONSEILLER EXPERT" (C'est lui qui débloque Lyon)
-    // ==================================================================================
-    const systemPrompt = `Tu es un conseiller expert en formation.
-    Ton but : Trouver des formations RÉELLES pour le métier demandé.
-    
-    Raisonnement :
-    1. Si le métier est "Cadre" (ex: Responsable Silo), cherche les Écoles d'Ingénieurs, IUT, Masters.
-    2. Si le métier est "Ouvrier" (ex: Agent), cherche les Lycées Agricoles, CFPPA, MFR.
-    3. Si le diplôme exact n'existe pas, trouve le diplôme transversal le plus proche (ex: Maintenance, Logistique).
-    
-    JSON STRICT UNIQUEMENT :
-    { "formations": [{ "intitule": "", "organisme": "", "ville": "", "rncp": "", "modalite": "", "niveau": "" }] }`;
+    const systemPrompt = `Tu es un MOTEUR DE RECHERCHE D'ÉTABLISSEMENTS.
+    Trouve les établissements réels. 
+    JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "rncp": "", "modalite": "", "niveau": "" }] }`;
 
-    const userPrompt = `Trouve 15 formations pour devenir "${metier}" autour de "${zonePrompt}".
-    CONTEXTE CIBLE : ${config.contexte}.
-    
-    RÈGLES :
-    - Cherche large : Public, Privé, Universités, CFA.
-    - Donne le NOM EXACT de l'école et sa VILLE.
-    - JSON uniquement.`;
+    // On injecte le villeContext qui contient le département (ex: Fresnes 94) pour que l'IA ne cherche pas Fresnes (02)
+    const userPrompt = `Trouve 15 formations pour : "${config.diplomes.join(", ")}" 
+    ZONE DE RECHERCHE : ${zonePrompt}.
+    CONTEXTE : ${config.contexte}.
+    Règle : Donne le NOM EXACT et la VILLE. JSON uniquement.`;
 
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
@@ -136,7 +182,7 @@ Deno.serve(async (req: Request) => {
     if (!perplexityResponse.ok) throw new Error(`Erreur API: ${perplexityResponse.status}`);
     const data = await perplexityResponse.json();
     
-    // 4. PARSING ROBUSTE
+    // 4. PARSING
     let result;
     try {
         const clean = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -145,96 +191,10 @@ Deno.serve(async (req: Request) => {
         result = JSON.parse(clean.substring(start, end + 1));
     } catch { result = { formations: [] }; }
 
-    // ==================================================================================
-    // 5. LE FILET DE SÉCURITÉ (API GOUV + FILTRES)
-    // ==================================================================================
+    // 5. VALIDATION & FILTRAGE (RETOUR DU FILET DE SÉCURITÉ V32)
     if (result.formations && result.formations.length > 0) {
         
-        // Vérification des adresses en parallèle
         const verificationPromises = result.formations.map(async (f: any) => {
             try {
-                // Recherche exacte
                 let query = `${f.organisme} ${f.ville}`;
-                let apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=1`);
-                let apiData = await apiRep.json();
-
-                // Fallback ville seule
-                if (!apiData.features?.length) {
-                    apiRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(f.ville)}&type=municipality&limit=1`);
-                    apiData = await apiRep.json();
-                }
-
-                if (apiData.features?.length > 0) {
-                    const coords = apiData.features[0].geometry.coordinates;
-                    if (userLat !== 0) {
-                        f.distance_km = haversineDistance(userLat, userLon, coords[1], coords[0]);
-                    } else { f.distance_km = 999; }
-                } else { f.distance_km = 999; }
-            } catch { f.distance_km = 999; }
-            return f;
-        });
-
-        await Promise.all(verificationPromises);
-
-        const niveauCible = niveau === 'all' ? null : niveau.toString();
-        const uniqueSet = new Set();
-
-        result.formations = result.formations.filter((f: any) => {
-            // Nettoyage niveau
-            if(f.niveau && f.niveau.toString().startsWith('Niveau')) f.niveau = f.niveau.replace('Niveau ', '').trim();
-            if (niveauCible && f.niveau !== 'N/A' && f.niveau !== niveauCible) return false;
-
-            const org = f.organisme.toLowerCase();
-            if (org.includes("lycées") || org.includes("réseau")) return false;
-
-            const key = `${f.intitule}-${f.organisme}`;
-            if (uniqueSet.has(key)) return false;
-            uniqueSet.add(key);
-
-            // FILTRE DISTANCE : On est large (100km) car l'API Gouv est fiable
-            return (f.distance_km || 999) <= 100;
-        });
-
-        // ENRICHISSEMENT FINAL
-        result.formations.forEach((f: any) => {
-            const intituleUpper = f.intitule.toUpperCase();
-            
-            // Catégorie
-            if (intituleUpper.match(/BAC|BTS|BUT|CAP|LICENCE|TITRE|MASTER|INGÉNIEUR/)) f.categorie = "Diplôme";
-            else if (intituleUpper.match(/CQP|CS /)) f.categorie = "Certification";
-            else f.categorie = "Habilitation";
-
-            // Alternance Ocapiat
-            const mode = (f.modalite || "").toLowerCase();
-            if (mode.includes("apprenti") || mode.includes("alternance") || mode.includes("pro")) {
-                f.alternance = "Oui"; f.modalite = "Alternance";
-            } else {
-                f.alternance = "Non"; f.modalite = "Initial";
-            }
-
-            // Patch RNCP
-            if (!f.rncp || f.rncp.length < 5) {
-                for (const [key, code] of Object.entries(RNCP_DB)) {
-                    if (intituleUpper.includes(key)) { f.rncp = code; break; }
-                }
-            }
-        });
-
-        result.formations.sort((a: any, b: any) => a.distance_km - b.distance_km);
-    }
-
-    const finalResponse = {
-        metier_normalise: metier,
-        ville_reference: ville,
-        formations: result.formations || []
-    };
-
-    console.log(`✅ V32 FUSION: ${finalResponse.formations.length} résultats.`);
-
-    return new Response(JSON.stringify(finalResponse), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-  } catch (error: any) {
-    console.error('❌ Error:', error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-});
+                let apiRep = await fetch(`https://api-adresse.data.gouv.
