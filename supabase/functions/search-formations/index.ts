@@ -7,32 +7,44 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. MAPPING MÉTIER -> CODES ROME (TRADUCTEUR OCAPIAT -> FRANCE TRAVAIL)
+// 1. MAPPING MÉTIER -> CODES ROME (CORRIGÉ POUR ÉVITER LES INGÉNIEURS)
 // ==================================================================================
 const METIER_TO_ROME: Record<string, string[]> = {
-    // TECHNICO : Vente technique et commerciale
+    // TECHNICO : Vente technique
     "technico": ["D1407", "D1402", "D1403"], 
-    // SILO : Conduite engins agri + Stockage
-    "silo": ["A1416", "A1101", "I1102"], 
+    
+    // SILO (CORRIGÉ) : On vise l'Ouvrier (Conduite) et le Technicien (Méca)
+    // J'ai retiré les codes de management qui amenaient les ingénieurs
+    "silo": ["A1416", "A1101", "I1304", "I1309"], 
+    
     // CHAUFFEUR : Transport routier + Conduite agri
     "chauffeur": ["N4101", "N4105", "A1101"], 
-    // RESPONSABLE SILO : Encadrement agri + Logistique
-    "responsable_silo": ["A1301", "A1303", "N1301"], 
-    // LOGISTIQUE : Responsable logistique
+    
+    // RESPONSABLE SILO : Ici on garde le management (Ingénieurs bienvenus)
+    "responsable_silo": ["A1301", "A1303", "I1102"], 
+    
+    // LOGISTIQUE
     "logistique": ["N1301", "N1302"], 
-    // MAGASINIER : Magasinage + Manutention
+    
+    // MAGASINIER
     "magasinier": ["N1103", "N1105"], 
-    // MAINTENANCE : Maintenance industrielle et engins
+    
+    // MAINTENANCE
     "maintenance": ["I1304", "I1309", "I1602"], 
-    // QUALITÉ : Qualité alimentaire
+    
+    // QUALITÉ
     "qualite": ["H1502", "H1206"], 
-    // AGRÉEUR : Contrôle qualité matières premières
+    
+    // AGRÉEUR
     "agreeur": ["H1502", "D1101"], 
-    // LIGNE : Conduite équipement industriel
+    
+    // LIGNE
     "ligne": ["H2102", "H2903"], 
-    // CULTURE : Conseil et ingénierie agri
+    
+    // CULTURE
     "culture": ["A1301", "A1302"], 
-    // EXPORT : Commerce international
+    
+    // EXPORT
     "export": ["D1401", "D1402"] 
 };
 
@@ -59,7 +71,6 @@ Deno.serve(async (req: Request) => {
     if (!metier || !ville) throw new Error("Paramètres manquants");
 
     // 1. GÉOCODAGE (API Gouv - Gratuit)
-    // On trouve les coordonnées GPS exactes de la ville demandée
     let lat = 0, lon = 0;
     let villeRef = ville;
     
@@ -75,37 +86,36 @@ Deno.serve(async (req: Request) => {
         throw new Error("Ville introuvable. Vérifiez l'orthographe.");
     }
 
-    // 2. APPEL FRANCE TRAVAIL (API La Bonne Alternance - Gratuit)
+    // 2. APPEL FRANCE TRAVAIL (La Bonne Alternance - Gratuit)
     const metierKey = detecterMetierKey(metier);
     const romes = METIER_TO_ROME[metierKey];
-    // On cherche large (100km) pour être sûr de trouver les formations rares (Agri)
-    const radius = 100; 
     
-    // Cette URL interroge directement le catalogue national des formations
+    // On appelle l'API officielle
+    const radius = 60; // 60km c'est raisonnable
     const lbaUrl = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=${radius}&caller=ocapiat_app`;
 
     const lbaRep = await fetch(lbaUrl);
-    if (!lbaRep.ok) throw new Error("Service formation indisponible momentanément (API LBA)");
+    if (!lbaRep.ok) throw new Error("Service formation indisponible momentanément");
     
     const lbaData = await lbaRep.json();
     const rawResults = lbaData.results || [];
 
-    // 3. NETTOYAGE & STANDARDISATION
+    // 3. NETTOYAGE
     const formations = rawResults.map((item: any) => {
-        // Déduction du niveau depuis le titre officiel
         let niveau = "N/A";
         const title = (item.title || "").toUpperCase();
         
+        // Déduction propre du niveau
         if (title.includes("CAP") || title.includes("TITRE PRO NIVEAU 3")) niveau = "3";
         else if (title.includes("BAC") || title.includes("BP") || title.includes("NIVEAU 4")) niveau = "4";
         else if (title.includes("BTS") || title.includes("DEUST") || title.includes("NIVEAU 5")) niveau = "5";
         else if (title.includes("BUT") || title.includes("LICENCE") || title.includes("BACHELOR") || title.includes("NIVEAU 6")) niveau = "6";
         else if (title.includes("MASTER") || title.includes("INGÉNIEUR")) niveau = "6"; 
 
-        // L'API nous donne la distance réelle en km
+        // Extraction distance réelle
         const dist = item.place?.distance ? Math.round(item.place.distance) : 999;
 
-        // On récupère le code RNCP s'il existe
+        // Code RNCP
         const rncpCode = item.rncpCode || (item.rncpLabel ? "RNCP Disponible" : "Non renseigné");
 
         return {
@@ -114,7 +124,7 @@ Deno.serve(async (req: Request) => {
             ville: item.place?.city || "",
             rncp: rncpCode,
             niveau: niveau,
-            modalite: "Alternance", // LBA est spécialisé Alternance
+            modalite: "Alternance", 
             alternance: "Oui",
             categorie: title.includes("TITRE") ? "Certification" : "Diplôme",
             distance_km: dist,
@@ -122,7 +132,7 @@ Deno.serve(async (req: Request) => {
         };
     });
 
-    // Tri par distance (du plus proche au plus loin)
+    // Tri par distance
     formations.sort((a: any, b: any) => a.distance_km - b.distance_km);
 
     // On garde les 20 plus proches
