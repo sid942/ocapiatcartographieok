@@ -44,7 +44,7 @@ const METIERS_RULES: Record<string, { definition: string, priorites: string[], i
     chauffeur: {
         definition: "Conduite de poids lourds ou d'engins agricoles pour le transport de marchandises.",
         priorites: ["routier", "conduite", "transport", "marchandises", "agricole", "engin", "fimo", "super lourd"],
-        interdits: ["voyageurs", "bus", "commun", "taxi", "ambulance", "vtc"],
+        interdits: ["ligne","voyageurs", "bus", "commun", "taxi", "ambulance", "vtc"],
         niveaux: ["3", "4"] 
     },
     technico: {
