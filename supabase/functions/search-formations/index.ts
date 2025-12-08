@@ -7,14 +7,13 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. CONFIGURATION DES REQUETES (STRATÉGIE MIXTE)
+// 1. CONFIGURATION ROME (Codes pour l'API État LBA)
 // ==================================================================================
-
-// Pour la plupart des métiers, on cherche tout d'un coup
-const METIER_TO_ROME_SIMPLE: Record<string, string[]> = {
+const METIER_TO_ROME: Record<string, string[]> = {
     "technico": ["D1407", "D1402", "D1403"], 
+    "silo": ["A1416", "A1101", "I1304", "I1309"], // Conduite + Maintenance
     "chauffeur": ["N4101", "N4105", "A1101"], 
-    "responsable_silo": ["A1301", "A1303", "I1102"], 
+    "responsable_silo": ["A1301", "A1303", "I1102", "H1302"], 
     "logistique": ["N1301", "N1302"], 
     "magasinier": ["N1103", "N1105"], 
     "maintenance": ["I1304", "I1309", "I1602"], 
@@ -25,10 +24,71 @@ const METIER_TO_ROME_SIMPLE: Record<string, string[]> = {
     "export": ["D1401", "D1402"] 
 };
 
-// Pour "Silo", on sépare pour éviter que l'industrie n'écrase l'agricole
-const SILO_STRATEGY = {
-    agri: ["A1416", "A1101"], // Conduite engins agri, Silo (On cherchera LOIN)
-    tech: ["I1304", "I1309"]  // Maintenance industrielle (On cherchera PRÈS)
+// ==================================================================================
+// 2. RÈGLES MÉTIER (SCORING & FILTRAGE)
+// ==================================================================================
+const METIERS_RULES: Record<string, { priorites: string[], interdits: string[], niveaux: string[] }> = {
+    silo: {
+        priorites: ["silo", "céréale", "grain", "agricole", "maintenance", "électro", "systèmes", "conduite", "agroéquipement", "gdea"],
+        interdits: ["nucléaire", "aéronautique", "spatial", "bureautique", "chimie", "informatique"],
+        niveaux: ["3", "4", "5"] 
+    },
+    responsable_silo: {
+        // Liste resserrée pour éviter le management généraliste
+        priorites: ["silo", "céréale", "grain", "stockage", "logistique agricole", "qualité grain", "cfppa", "gdea", "agronomie", "productions végétales"],
+        interdits: ["eau", "piscine", "paysage", "forêt", "animal", "nucléaire", "aéro", "informatique", "bancaire", "assurance"],
+        niveaux: ["5", "6"] 
+    },
+    chauffeur: {
+        priorites: ["routier", "conduite", "transport", "marchandises", "agricole", "engin", "fimo", "super lourd"],
+        interdits: ["voyageurs", "bus", "commun", "taxi", "ambulance", "vtc"],
+        niveaux: ["3", "4"] 
+    },
+    technico: {
+        priorites: ["technico", "commercial", "vente", "négociation", "client", "business", "force de vente"],
+        interdits: ["coiffure", "esthétique", "immobilier", "tourisme"],
+        niveaux: ["5", "6"] 
+    },
+    logistique: {
+        priorites: ["logistique", "supply", "chaîne", "transport", "flux", "entrepôt"],
+        interdits: [],
+        niveaux: ["5", "6"]
+    },
+    magasinier: {
+        priorites: ["magasinier", "préparateur", "commande", "logistique", "cariste", "caces", "stock"],
+        interdits: [],
+        niveaux: ["3", "4"]
+    },
+    maintenance: {
+        priorites: ["maintenance", "industrielle", "systèmes", "électrotechnique", "mécanique", "automatisme", "melec", "mspc"],
+        interdits: ["informatique", "réseaux", "télécom", "véhicule léger", "automobile", "nucléaire", "aéro"],
+        niveaux: ["3", "4", "5"]
+    },
+    qualite: {
+        priorites: ["qualité", "laboratoire", "analyse", "contrôle", "alimentaire", "biologie", "bio", "qhse"],
+        interdits: ["aéronautique", "médical", "soin"],
+        niveaux: ["5", "6"]
+    },
+    agreeur: {
+        priorites: ["qualité", "agricole", "céréale", "grain", "laboratoire", "agronomie", "classement"],
+        interdits: [],
+        niveaux: ["4", "5"]
+    },
+    ligne: {
+        priorites: ["ligne", "pilote", "conducteur", "production", "procédés", "industriel"],
+        interdits: ["bus", "routier"],
+        niveaux: ["3", "4", "5"]
+    },
+    culture: {
+        priorites: ["agronomie", "végétal", "culture", "agricole", "exploitation", "technicien"],
+        interdits: ["animal", "élevage", "cheval", "soigneur"],
+        niveaux: ["5", "6"]
+    },
+    export: {
+        priorites: ["international", "export", "anglais", "commerce", "échange", "import"],
+        interdits: [],
+        niveaux: ["5", "6"]
+    }
 };
 
 function detecterMetierKey(input: string): string {
@@ -46,107 +106,54 @@ function detecterMetierKey(input: string): string {
     return "technico"; 
 }
 
-// Fonction helper pour appeler l'API LBA
-async function fetchLBA(romes: string[], lat: number, lon: number, radius: number) {
-    const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=${radius}&caller=ocapiat_app`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.results || [];
+// ==================================================================================
+// 3. FONCTIONS DE RÉCUPÉRATION (HYBRIDE)
+// ==================================================================================
+
+// Source 1 : La Bonne Alternance (API État)
+async function fetchLBA(romes: string[], lat: number, lon: number) {
+    const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=100&caller=ocapiat_app`;
+    try {
+        const res = await fetch(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.results || []).map((item: any) => {
+            const title = (item.title || "").toUpperCase();
+            let niveau = "N/A";
+            if (title.includes("CAP") || title.includes("TITRE PRO NIVEAU 3")) niveau = "3";
+            else if (title.includes("BAC") || title.includes("BP") || title.includes("NIVEAU 4")) niveau = "4";
+            else if (title.includes("BTS") || title.includes("DEUST") || title.includes("NIVEAU 5")) niveau = "5";
+            else if (title.includes("BUT") || title.includes("LICENCE") || title.includes("BACHELOR") || title.includes("NIVEAU 6")) niveau = "6";
+            else if (title.includes("MASTER") || title.includes("INGÉNIEUR")) niveau = "6"; 
+
+            return {
+                id: item.id || Math.random().toString(),
+                intitule: item.title || "Formation",
+                organisme: item.company?.name || "Organisme de formation",
+                ville: item.place?.city || "",
+                rncp: item.rncpCode || (item.rncpLabel ? "RNCP Disponible" : "Non renseigné"),
+                niveau: niveau,
+                modalite: "Alternance",
+                alternance: "Oui",
+                categorie: title.includes("TITRE") ? "Certification" : "Diplôme",
+                distance_km: item.place?.distance ? Math.round(item.place.distance) : 999,
+                site_web: item.url || item.company?.url || null,
+                source: "LBA"
+            };
+        });
+    } catch { return []; }
 }
 
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
+// Source 2 : Perplexity (IA) - Avec Injection des règles pour cadrage
+async function fetchPerplexity(metierKey: string, villePrompt: string, apiKey: string) {
+    if (!["silo", "culture", "agreeur", "responsable_silo", "chauffeur"].includes(metierKey)) return [];
 
-  try {
-    const { metier, ville } = await req.json();
-    if (!metier || !ville) throw new Error("Paramètres manquants");
-
-    // 1. GÉOCODAGE
-    let lat = 0, lon = 0;
-    let villeRef = ville;
-    const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
-    const geoData = await geoRep.json();
+    const rules = METIERS_RULES[metierKey];
     
-    if (geoData.features && geoData.features.length > 0) {
-        const f = geoData.features[0];
-        lon = f.geometry.coordinates[0];
-        lat = f.geometry.coordinates[1];
-        villeRef = `${f.properties.city} (${f.properties.postcode})`;
-    } else {
-        throw new Error("Ville introuvable.");
-    }
-
-    // 2. EXÉCUTION DE LA RECHERCHE (Stratégie Double ou Simple)
-    const metierKey = detecterMetierKey(metier);
-    let rawResults: any[] = [];
-
-    if (metierKey === "silo") {
-        // --- STRATÉGIE "SILO" DOUBLE DÉTENTE ---
-        console.log("🚜 Mode Silo activé : Agri étendu + Tech local");
-        
-        // Requête 1 : Agri (Loin - 150km) pour choper Bougainville, etc.
-        const resultsAgri = await fetchLBA(SILO_STRATEGY.agri, lat, lon, 150);
-        
-        // Requête 2 : Tech (Près - 30km) pour les Lycées Pros du coin
-        const resultsTech = await fetchLBA(SILO_STRATEGY.tech, lat, lon, 30);
-        
-        // Fusion (L'agri en premier dans la liste brute avant le tri final)
-        rawResults = [...resultsAgri, ...resultsTech];
-    } else {
-        // --- STRATÉGIE CLASSIQUE ---
-        const romes = METIER_TO_ROME_SIMPLE[metierKey] || METIER_TO_ROME_SIMPLE["technico"];
-        rawResults = await fetchLBA(romes, lat, lon, 100);
-    }
-
-    // 3. NETTOYAGE & DÉDOUBLONNAGE
-    const processedFormations = rawResults.map((item: any) => {
-        // Niveau
-        let niveau = "N/A";
-        const title = (item.title || "").toUpperCase();
-        if (title.includes("CAP") || title.includes("TITRE PRO NIVEAU 3")) niveau = "3";
-        else if (title.includes("BAC") || title.includes("BP") || title.includes("NIVEAU 4")) niveau = "4";
-        else if (title.includes("BTS") || title.includes("DEUST") || title.includes("NIVEAU 5")) niveau = "5";
-        else if (title.includes("BUT") || title.includes("LICENCE") || title.includes("BACHELOR") || title.includes("NIVEAU 6")) niveau = "6";
-        else if (title.includes("MASTER") || title.includes("INGÉNIEUR")) niveau = "6"; 
-
-        const dist = item.place?.distance ? Math.round(item.place.distance) : 999;
-        const rncpCode = item.rncpCode || (item.rncpLabel ? "RNCP Disponible" : "Non renseigné");
-
-        return {
-            id: item.id || Math.random().toString(), // Pour dédoublonner
-            intitule: item.title || "Formation",
-            organisme: item.company?.name || "Organisme de formation",
-            ville: item.place?.city || "",
-            rncp: rncpCode,
-            niveau: niveau,
-            modalite: "Alternance",
-            alternance: "Oui",
-            categorie: title.includes("TITRE") ? "Certification" : "Diplôme",
-            distance_km: dist,
-            site_web: item.url || item.company?.url || null
-        };
-    });
-
-    // Dédoublonnage (Important car on fusionne 2 listes pour Silo)
-    const uniqueFormations = processedFormations.filter((v, i, a) => 
-        a.findIndex(t => (t.intitule === v.intitule && t.organisme === v.organisme)) === i
-    );
-
-    // Tri intelligent : On garde le tri par distance, MAIS les Agri (radius 150) seront présents
-    // Si on veut forcer l'Agri en haut, on pourrait trier par catégorie, mais la distance reste le plus pertinent pour l'utilisateur.
-    // Le fait d'avoir restreint la Tech à 30km évite qu'elle pollue tout l'écran.
-    uniqueFormations.sort((a: any, b: any) => a.distance_km - b.distance_km);
-
-    const finalFormations = uniqueFormations.slice(0, 20);
-
-    return new Response(JSON.stringify({
-        metier_normalise: metier,
-        ville_reference: villeRef,
-        formations: finalFormations
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-  } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  }
-});
+    const systemPrompt = `Tu es un expert en formation agricole.
+    RÈGLES STRICTES :
+    1. Formations prioritaires : ${rules.priorites.join(", ")}.
+    2. Formations INTERDITES : ${rules.interdits.join(", ")}.
+    3. Niveaux autorisés uniquement : ${rules.niveaux.join(", ")}.
+    
+    JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "niveau": "3/4/5/
