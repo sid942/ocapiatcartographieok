@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. CONFIGURATION ROME (LBA)
+// 1. CONFIGURATION ROME (Codes pour l'API État LBA)
 // ==================================================================================
 const METIER_TO_ROME: Record<string, string[]> = {
     "technico": ["D1407", "D1402", "D1403"], 
@@ -25,65 +25,78 @@ const METIER_TO_ROME: Record<string, string[]> = {
 };
 
 // ==================================================================================
-// 2. RÈGLES MÉTIER (FILTRAGE & PRIORITÉ)
+// 2. RÈGLES MÉTIER & DÉFINITIONS (POUR GUIDER L'IA)
 // ==================================================================================
-const METIERS_RULES: Record<string, { priorites: string[], interdits: string[], niveaux: string[] }> = {
+// definition : Sert à expliquer le métier à l'IA pour qu'elle ne confonde pas "Silo" et "Ferme"
+const METIERS_RULES: Record<string, { definition: string, priorites: string[], interdits: string[], niveaux: string[] }> = {
     silo: {
-        priorites: ["silo", "céréale", "grain", "agricole", "conduite", "agroéquipement", "gdea"],
-        interdits: ["nucléaire", "aéronautique", "spatial", "bureautique", "chimie", "informatique", "web"],
+        definition: "Travail en SILO CÉRÉALIER : réception, séchage, tri, stockage, expédition des grains. Pas d'élevage ni de gestion de ferme globale.",
+        priorites: ["silo", "stockage", "céréale", "grain", "tri", "séchage", "manutention", "coopérative", "cqp", "cs", "gdea", "agroéquipement"],
+        interdits: ["nucléaire", "aéronautique", "spatial", "bureautique", "chimie", "informatique", "web", "élevage", "soigneur"],
         niveaux: ["3", "4", "5"] 
     },
     responsable_silo: {
-        priorites: ["silo", "céréale", "grain", "stockage", "logistique agricole", "qualité grain", "cfppa", "gdea", "agronomie"],
+        definition: "Management d'un site de stockage de grains. Gestion de production, qualité, logistique et encadrement d'équipe.",
+        priorites: ["silo", "céréale", "grain", "stockage", "logistique agricole", "qualité grain", "cfppa", "gdea", "agronomie", "production"],
         interdits: ["eau", "piscine", "paysage", "forêt", "animal", "nucléaire", "aéro", "informatique"],
         niveaux: ["5", "6"] 
     },
     chauffeur: {
+        definition: "Conduite de poids lourds ou d'engins agricoles pour le transport de marchandises.",
         priorites: ["routier", "conduite", "transport", "marchandises", "agricole", "engin", "fimo", "super lourd"],
         interdits: ["voyageurs", "bus", "commun", "taxi", "ambulance", "vtc"],
         niveaux: ["3", "4"] 
     },
     technico: {
-        priorites: ["technico", "commercial", "vente", "négociation", "client", "business"],
+        definition: "Vente de produits techniques auprès de professionnels (B2B).",
+        priorites: ["technico", "commercial", "vente", "négociation", "client", "business", "force de vente"],
         interdits: ["coiffure", "esthétique", "immobilier", "tourisme"],
         niveaux: ["5", "6"] 
     },
     logistique: {
+        definition: "Organisation des flux de marchandises et gestion d'entrepôt.",
         priorites: ["logistique", "supply", "chaîne", "transport", "flux", "entrepôt"],
         interdits: [],
         niveaux: ["5", "6"]
     },
     magasinier: {
+        definition: "Réception, stockage et préparation de commandes.",
         priorites: ["magasinier", "préparateur", "commande", "logistique", "cariste", "caces", "stock"],
         interdits: [],
         niveaux: ["3", "4"]
     },
     maintenance: {
+        definition: "Entretien et réparation d'équipements industriels et machines.",
         priorites: ["maintenance", "industrielle", "systèmes", "électrotechnique", "mécanique", "automatisme", "melec", "mspc"],
         interdits: ["informatique", "réseaux", "télécom", "véhicule léger", "automobile", "nucléaire", "aéro"],
         niveaux: ["3", "4", "5"]
     },
     qualite: {
+        definition: "Contrôle de la qualité des produits alimentaires et respect des normes.",
         priorites: ["qualité", "laboratoire", "analyse", "contrôle", "alimentaire", "biologie", "bio", "qhse"],
         interdits: ["aéronautique", "médical", "soin"],
         niveaux: ["5", "6"]
     },
     agreeur: {
+        definition: "Analyse et classement des grains à la réception (Silo).",
         priorites: ["qualité", "agricole", "céréale", "grain", "laboratoire", "agronomie", "classement"],
         interdits: [],
         niveaux: ["4", "5"]
     },
     ligne: {
+        definition: "Surveillance et pilotage de machines de production industrielle.",
         priorites: ["ligne", "pilote", "conducteur", "production", "procédés", "industriel"],
         interdits: ["bus", "routier"],
         niveaux: ["3", "4", "5"]
     },
     culture: {
+        definition: "Suivi technique des cultures végétales (Agronomie).",
         priorites: ["agronomie", "végétal", "culture", "agricole", "exploitation", "technicien"],
         interdits: ["animal", "élevage", "cheval", "soigneur"],
         niveaux: ["5", "6"]
     },
     export: {
+        definition: "Commerce international et gestion des échanges import-export.",
         priorites: ["international", "export", "anglais", "commerce", "échange", "import"],
         interdits: [],
         niveaux: ["5", "6"]
@@ -106,18 +119,10 @@ function detecterMetierKey(input: string): string {
 }
 
 // ==================================================================================
-// 3. OUTILS (GPS & FETCH)
+// 3. FONCTIONS API
 // ==================================================================================
 
-function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-    const R = 6371; 
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return Math.round(R * c);
-}
-
+// LBA : API État (Fiable sur distance et existence, mais biais CGEA)
 async function fetchLBA(romes: string[], lat: number, lon: number) {
     const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=100&caller=ocapiat_app`;
     try {
@@ -151,25 +156,28 @@ async function fetchLBA(romes: string[], lat: number, lon: number) {
     } catch { return []; }
 }
 
+// IA : Perplexity (Pour trouver les CQP/CS spécifiques que LBA rate)
 async function fetchPerplexity(metierKey: string, promptZone: string, apiKey: string, isRescueMode = false) {
-    // Si Rescue Mode, on élargit le contexte à fond
     const contextPrompt = isRescueMode 
-        ? "URGENT: Cherche dans TOUTE LA RÉGION et les départements voisins. Ignore la ville précise s'il le faut. Trouve les Lycées Agricoles, CFPPA, MFR."
+        ? "URGENT: Cherche dans TOUTE LA RÉGION et départements voisins. Trouve impérativement les CFPPA et MFR."
         : "Cherche autour de la ville indiquée.";
 
     const rules = METIERS_RULES[metierKey];
     
+    // On injecte la définition précise du métier pour guider l'IA
     const systemPrompt = `Tu es un expert en formation agricole.
-    RÈGLES :
-    1. Priorité absolue : ${rules.priorites.join(", ")}.
-    2. Interdits : ${rules.interdits.join(", ")}.
-    3. Niveaux : ${rules.niveaux.join(", ")}.
+    MÉTIER CIBLE : ${rules.definition}
+    
+    RÈGLES DE RECHERCHE :
+    1. Priorité absolue aux formations contenant : ${rules.priorites.join(", ")}.
+    2. Exclure formellement : ${rules.interdits.join(", ")}.
+    3. Niveaux cibles : ${rules.niveaux.join(", ")}.
     4. ${contextPrompt}
     
     JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "niveau": "3/4/5/6" }] }`;
 
-    const userPrompt = `Trouve 5 établissements pour "${metierKey}" vers "${promptZone}".
-    Privilégie les formations spécifiques NON trouvées en alternance (Scolaire, Initiale).
+    const userPrompt = `Trouve 5 établissements spécifiques pour "${metierKey}" vers "${promptZone}".
+    Concentre-toi sur les CQP, CS, et Titres Pro spécifiques au métier.
     JSON uniquement.`;
 
     try {
@@ -193,14 +201,14 @@ async function fetchPerplexity(metierKey: string, promptZone: string, apiKey: st
             modalite: "Initiale / Continue",
             alternance: "Non",
             categorie: "Diplôme",
-            distance_km: 999, // On recalcule plus tard si possible
+            distance_km: 999,
             source: "IA"
         }));
     } catch { return []; }
 }
 
 // ==================================================================================
-// 4. HANDLER PRINCIPAL
+// 4. LOGIQUE PRINCIPALE
 // ==================================================================================
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -210,7 +218,7 @@ Deno.serve(async (req: Request) => {
     if (!metier || !ville) throw new Error("Paramètres manquants");
     const perplexityApiKey = Deno.env.get("PERPLEXITY_API_KEY");
 
-    // 1. GÉOCODAGE + CONTEXTE RÉGIONAL
+    // 1. GÉOCODAGE
     let lat = 0, lon = 0;
     let villeRef = ville;
     let regionContext = "";
@@ -222,12 +230,12 @@ Deno.serve(async (req: Request) => {
         lon = f.geometry.coordinates[0];
         lat = f.geometry.coordinates[1];
         villeRef = `${f.properties.city} (${f.properties.postcode})`;
-        regionContext = f.properties.context || "France"; // ex: "91, Essonne, Île-de-France"
+        regionContext = f.properties.context || "France";
     } else {
         throw new Error("Ville introuvable.");
     }
 
-    // 2. APPELS STANDARD (LBA + IA Locale)
+    // 2. RECHERCHE HYBRIDE INITIALE
     const metierKey = detecterMetierKey(metier);
     const romes = METIER_TO_ROME[metierKey];
     const rules = METIERS_RULES[metierKey];
@@ -240,19 +248,21 @@ Deno.serve(async (req: Request) => {
 
     let allFormations = [...lbaResults, ...iaResults];
 
-    // 3. CHECK DE SAUVETAGE (Le "Rescue Mode")
-    // Est-ce qu'on a trouvé au moins UNE formation prioritaire ?
-    const hasAgri = allFormations.some(f => {
+    // 3. CHECK QUALITÉ ("Rescue Mode")
+    // On vérifie si on a trouvé des formations vraiment spécifiques (CQP, CS, Stockage...)
+    // Sinon on est probablement noyé dans le CGEA ou la Maintenance générique.
+    const hasSpecificAgri = allFormations.some(f => {
         const txt = ((f.intitule || "") + " " + (f.organisme || "")).toLowerCase();
-        return rules.priorites.some(p => txt.includes(p));
+        // On cherche les mots clés FORTS (stockage, silo, grain, cqp, cs)
+        const strongKeywords = ["stockage", "silo", "grain", "cqp", "cs ", "gdea"];
+        return strongKeywords.some(k => txt.includes(k));
     });
 
-    // Si on cherche un métier Agri et qu'on a ZERO résultat pertinent -> ON FORCE L'IA EN MODE RÉGIONAL
-    if (!hasAgri && isAgriMetier && perplexityApiKey) {
-        console.log("🚨 RESCUE MODE ACTIVÉ : Recherche régionale étendue...");
+    if (!hasSpecificAgri && isAgriMetier && perplexityApiKey) {
+        console.log("🚨 RESCUE MODE : Pas de CQP/CS trouvé, on relance l'IA large...");
         const rescueResults = await fetchPerplexity(metierKey, regionContext, perplexityApiKey, true);
         
-        // On recalcule la distance pour ces résultats de sauvetage (pour ne pas qu'ils restent à 999)
+        // On tente de géocoder les résultats IA pour avoir une distance
         for (const f of rescueResults) {
             try {
                 const rGeo = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(f.organisme + " " + f.ville)}&limit=1`);
@@ -266,32 +276,43 @@ Deno.serve(async (req: Request) => {
         allFormations = [...allFormations, ...rescueResults];
     }
 
-    // 4. FILTRAGE FINAL
+    // 4. FILTRAGE & SCORING FINAL
     const filteredFormations = allFormations.filter(f => {
         let score = 0;
         const txt = ((f.intitule || "") + " " + (f.organisme || "")).toLowerCase();
         
         if (rules.interdits.some(bad => txt.includes(bad))) return false;
         
+        // Bonus si mot-clé prioritaire
         if (rules.priorites.some(good => txt.includes(good))) score += 1;
+        // Bonus si niveau OK
         if (f.niveau === "N/A" || rules.niveaux.includes(f.niveau)) score += 1;
-        score += 1; // Bonus de base
+        
+        score += 1; // Bonus présence
 
         return score >= 2;
     });
 
-    // 5. TRI (BOOST AGRICOLE)
-    // On met les "Coeur de métier" devant, même si un peu plus loin
+    // 5. TRI FINAL (Les "Vrais" Agricoles d'abord, la technique ensuite)
     filteredFormations.sort((a, b) => {
         const txtA = ((a.intitule || "") + " " + (a.organisme || "")).toLowerCase();
         const txtB = ((b.intitule || "") + " " + (b.organisme || "")).toLowerCase();
         
+        // On donne un poids énorme aux mots clés "Silo", "Stockage", "CQP"
+        const strongKeywords = ["silo", "stockage", "grain", "cqp", "cs ", "gdea"];
+        const aIsCore = strongKeywords.some(k => txtA.includes(k));
+        const bIsCore = strongKeywords.some(k => txtB.includes(k));
+
+        if (aIsCore && !bIsCore) return -1;
+        if (!aIsCore && bIsCore) return 1;
+
+        // Sinon tri par priorité générale
         const aIsPriority = rules.priorites.some(p => txtA.includes(p));
         const bIsPriority = rules.priorites.some(p => txtB.includes(p));
-
         if (aIsPriority && !bIsPriority) return -1;
         if (!aIsPriority && bIsPriority) return 1;
 
+        // Enfin tri par distance
         return a.distance_km - b.distance_km;
     });
 
@@ -307,3 +328,13 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
+
+// Helper distance
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+    const R = 6371; 
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return Math.round(R * c);
+}
