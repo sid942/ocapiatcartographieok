@@ -4,14 +4,14 @@ import { METIERS, Metier, NominatimResult } from '../types';
 import { searchCities } from '../services/nominatim';
 
 interface SearchFormProps {
-  onSearch: (metier: Metier, ville: string, niveau: '4' | '5' | '6' | 'all') => void;
+  onSearch: (metier: Metier, ville: string, niveau: '3' | '4' | '5' | '6' | 'all') => void;
   isLoading: boolean;
 }
 
 export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
   const [metier, setMetier] = useState<Metier>(METIERS[0]);
   const [ville, setVille] = useState('');
-  const [niveau, setNiveau] = useState<'4' | '5' | '6' | 'all'>('all');
+  const [niveau, setNiveau] = useState<'3' | '4' | '5' | '6' | 'all'>('all');
   const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -101,10 +101,11 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
         </label>
         <select
           value={niveau}
-          onChange={(e) => setNiveau(e.target.value as '4' | '5' | '6' | 'all')}
+          onChange={(e) => setNiveau(e.target.value as '3' | '4' | '5' | '6' | 'all')}
           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#47A152] focus:border-transparent"
         >
           <option value="all">Tous</option>
+          <option value="3">Niveau 3 (CAP, BEP)</option>
           <option value="4">Niveau 4 (Bac)</option>
           <option value="5">Niveau 5 (Bac+2)</option>
           <option value="6">Niveau 6 (Bac+3/4)</option>
