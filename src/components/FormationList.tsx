@@ -95,7 +95,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
               <div className="flex items-start gap-2">
                 <Award className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
                 <span title="Répertoire National des Certifications Professionnelles">
-                  RNCP : {formation.rncp && formation.rncp !== 'Non renseigné' ? (
+                  RNCP&nbsp;: {formation.rncp && formation.rncp !== 'Non renseigné' ? (
                     <span className="font-mono text-gray-700">{formation.rncp}</span>
                   ) : 'Non renseigné'}
                 </span>
@@ -111,7 +111,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
               <div className="flex items-start gap-2">
                 <Briefcase className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
                 <span className={formation.alternance === 'Oui' ? 'text-[#47A152] font-semibold' : ''}>
-                  Alternance : {formation.alternance || (formation.modalite?.includes('Apprentissage') ? 'Oui' : 'Non')}
+                  Alternance&nbsp;: {formation.alternance || (formation.modalite?.includes('Apprentissage') ? 'Oui' : 'Non')}
                 </span>
               </div>
 
