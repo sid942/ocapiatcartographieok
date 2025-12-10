@@ -167,14 +167,15 @@ async function fetchPerplexity(metierKey: string, promptZone: string, apiKey: st
     // On injecte la définition précise du métier pour guider l'IA
     const systemPrompt = `Tu es un expert en formation agricole.
     MÉTIER CIBLE : ${rules.definition}
-    
+
     RÈGLES DE RECHERCHE :
     1. Priorité absolue aux formations contenant : ${rules.priorites.join(", ")}.
     2. Exclure formellement : ${rules.interdits.join(", ")}.
     3. Niveaux cibles : ${rules.niveaux.join(", ")}.
     4. ${contextPrompt}
-    
-    JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "niveau": "3/4/5/6" }] }`;
+
+    JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "niveau": "3/4/5/6", "site_web": "https://..." }] }
+    IMPORTANT: Pour chaque formation, cherche et inclus l'URL du site web de l'établissement si disponible.`;
 
     const userPrompt = `Trouve 5 établissements spécifiques pour "${metierKey}" vers "${promptZone}".
     Concentre-toi sur les CQP, CS, et Titres Pro spécifiques au métier.
@@ -202,6 +203,7 @@ async function fetchPerplexity(metierKey: string, promptZone: string, apiKey: st
             alternance: "Non",
             categorie: "Diplôme",
             distance_km: 999,
+            site_web: f.site_web || null,
             source: "IA"
         }));
     } catch { return []; }
