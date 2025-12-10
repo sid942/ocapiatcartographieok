@@ -76,11 +76,11 @@ function App() {
 
         <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-orange-50 to-white">
           <div className="mb-3">
-            <h1 className="text-xl font-bold text-gray-900 leading-tight">
-              Cartographie <span className="text-[#EB600A]">Formations</span>
+            <h1 className="text-lg font-bold text-gray-900 leading-tight">
+              Cartographie de l'offre de <span className="text-[#EB600A]">formation</span>
             </h1>
             <p className="text-xs text-gray-600 mt-1 font-medium">
-              Branche Négoce Agricole (OCAPIAT)
+              Branche du négoce agricole et des produits du sol
             </p>
           </div>
         </div>
