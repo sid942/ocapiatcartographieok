@@ -224,17 +224,31 @@ Deno.serve(async (req: Request) => {
     let lat = 0, lon = 0;
     let villeRef = ville;
     let regionContext = "";
-    
-    const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
-    const geoData = await geoRep.json();
-    if (geoData.features?.length > 0) {
-        const f = geoData.features[0];
-        lon = f.geometry.coordinates[0];
-        lat = f.geometry.coordinates[1];
-        villeRef = `${f.properties.city} (${f.properties.postcode})`;
-        regionContext = f.properties.context || "France";
+
+    // Essayer d'abord de chercher un département
+    const depRep = await fetch(`https://geo.api.gouv.fr/departements?nom=${encodeURIComponent(ville)}&fields=nom,code,centre`);
+    const depData = await depRep.json();
+
+    if (depData.length > 0) {
+        // C'est un département
+        const dep = depData[0];
+        lat = dep.centre.coordinates[1];
+        lon = dep.centre.coordinates[0];
+        villeRef = `${dep.nom} (${dep.code})`;
+        regionContext = dep.nom;
     } else {
-        throw new Error("Ville introuvable.");
+        // Sinon chercher une ville/commune
+        const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
+        const geoData = await geoRep.json();
+        if (geoData.features?.length > 0) {
+            const f = geoData.features[0];
+            lon = f.geometry.coordinates[0];
+            lat = f.geometry.coordinates[1];
+            villeRef = `${f.properties.city} (${f.properties.postcode})`;
+            regionContext = f.properties.context || "France";
+        } else {
+            throw new Error("Ville introuvable.");
+        }
     }
 
     // 2. RECHERCHE HYBRIDE INITIALE
