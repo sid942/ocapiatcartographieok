@@ -13,11 +13,12 @@ export interface FormationMapRef {
   flyToFormation: (formation: Formation) => void;
 }
 
-const createCustomIcon = (niveau: '4' | '5' | '6') => {
+const createCustomIcon = (niveau: '3' | '4' | '5' | '6') => {
   const colors = {
-    '4': '#3B82F6',
-    '5': '#F97316',
-    '6': '#10B981'
+    '3': '#74114D',
+    '4': '#F5A021',
+    '5': '#47A152',
+    '6': '#47A152'
   };
 
   return L.divIcon({
@@ -25,15 +26,15 @@ const createCustomIcon = (niveau: '4' | '5' | '6') => {
     html: `
       <div style="
         background-color: ${colors[niveau]};
-        width: 24px;
-        height: 24px;
+        width: 26px;
+        height: 26px;
         border-radius: 50%;
-        border: 2px solid white;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        border: 3px solid white;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
       "></div>
     `,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12]
+    iconSize: [26, 26],
+    iconAnchor: [13, 13]
   });
 };
 
@@ -120,7 +121,11 @@ export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(
 
                   <div>
                     <span className="font-medium text-gray-700">Niveau:</span>
-                    <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                    <span className={`ml-1 px-2 py-0.5 rounded text-xs font-bold ${
+                      formation.niveau === '3' ? 'bg-[#74114D]/10 text-[#74114D]' :
+                      formation.niveau === '4' ? 'bg-[#F5A021]/10 text-[#F5A021]' :
+                      'bg-[#47A152]/10 text-[#47A152]'
+                    }`}>
                       N{formation.niveau}
                     </span>
                   </div>
@@ -151,7 +156,7 @@ export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(
                         href={formation.site_web}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ml-1 text-blue-600 hover:text-blue-800 underline"
+                        className="ml-1 text-[#F5A021] hover:text-[#e69116] underline font-semibold"
                       >
                         Voir le site
                       </a>

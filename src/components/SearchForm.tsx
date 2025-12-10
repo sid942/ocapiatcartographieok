@@ -53,7 +53,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
         <select
           value={metier}
           onChange={(e) => setMetier(e.target.value as Metier)}
-          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#EB600A] focus:border-transparent"
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#47A152] focus:border-transparent"
         >
           {METIERS.map((m) => (
             <option key={m} value={m}>
@@ -73,7 +73,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
             value={ville}
             onChange={(e) => setVille(e.target.value)}
             placeholder="Paris, Lyon, Toulouse..."
-            className="w-full px-3 py-2 pl-8 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#EB600A] focus:border-transparent"
+            className="w-full px-3 py-2 pl-8 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#47A152] focus:border-transparent"
             required
           />
           <MapPin className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
@@ -102,7 +102,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
         <select
           value={niveau}
           onChange={(e) => setNiveau(e.target.value as '4' | '5' | '6' | 'all')}
-          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#EB600A] focus:border-transparent"
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#47A152] focus:border-transparent"
         >
           <option value="all">Tous</option>
           <option value="4">Niveau 4 (Bac)</option>
@@ -114,7 +114,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
       <button
         type="submit"
         disabled={isLoading || !ville}
-        className="w-full bg-[#EB600A] hover:bg-[#d55509] disabled:bg-gray-400 text-white font-semibold py-2.5 px-4 rounded-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 text-sm"
+        className="w-full bg-[#F5A021] hover:bg-[#e69116] disabled:bg-gray-400 text-white font-bold py-2.5 px-4 rounded-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 text-sm"
       >
         <Search className="h-4 w-4" />
         {isLoading ? 'Recherche...' : 'Rechercher'}

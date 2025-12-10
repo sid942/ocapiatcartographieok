@@ -23,10 +23,10 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
 
   const getLevelColor = (niveau: string | null) => {
     switch (niveau) {
-      case '3': return 'bg-purple-100 text-purple-800 border-purple-200'; // CAP/CQP
-      case '4': return 'bg-blue-100 text-blue-800 border-blue-200'; // Bac
-      case '5': return 'bg-orange-100 text-orange-800 border-orange-200'; // Bac+2
-      case '6': return 'bg-green-100 text-green-800 border-green-200'; // Bac+3
+      case '3': return 'bg-[#74114D]/10 text-[#74114D] border-[#74114D]/30'; // CAP/CQP
+      case '4': return 'bg-[#F5A021]/10 text-[#F5A021] border-[#F5A021]/30'; // Bac
+      case '5': return 'bg-[#47A152]/10 text-[#47A152] border-[#47A152]/30'; // Bac+2
+      case '6': return 'bg-[#47A152]/10 text-[#47A152] border-[#47A152]/30'; // Bac+3
       default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
@@ -40,7 +40,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
         <select
           value={niveauFilter}
           onChange={(e) => setNiveauFilter(e.target.value as any)}
-          className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-[#EB600A] outline-none"
+          className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-[#47A152] outline-none"
         >
           <option value="all">Tous niveaux</option>
           <option value="3">Niv. 3 (CAP)</option>
@@ -55,11 +55,11 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
           <div
             key={index}
             onClick={() => onFormationClick?.(formation)}
-            className="bg-gray-50 rounded-lg border border-gray-200 p-3 hover:bg-white hover:shadow-md hover:border-[#EB600A] transition-all cursor-pointer group"
+            className="bg-gray-50 rounded-lg border border-gray-200 p-3 hover:bg-white hover:shadow-lg hover:border-[#47A152] transition-all cursor-pointer group"
           >
             {/* Header Carte : Titre + Niveau */}
             <div className="flex items-start justify-between gap-2 mb-2">
-              <h3 className="font-bold text-gray-900 text-sm flex-1 leading-tight group-hover:text-[#EB600A] transition-colors">
+              <h3 className="font-bold text-gray-900 text-sm flex-1 leading-tight group-hover:text-[#47A152] transition-colors">
                 {formation.intitule}
               </h3>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(formation.niveau)}`}>
@@ -110,7 +110,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
               {/* Alternance (Demande spécifique Ocapiat) */}
               <div className="flex items-start gap-2">
                 <Briefcase className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
-                <span className={formation.alternance === 'Oui' ? 'text-green-700 font-medium' : ''}>
+                <span className={formation.alternance === 'Oui' ? 'text-[#47A152] font-semibold' : ''}>
                   Alternance : {formation.alternance || (formation.modalite?.includes('Apprentissage') ? 'Oui' : 'Non')}
                 </span>
               </div>
@@ -118,13 +118,13 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
               {/* Lien Site Web */}
               {formation.site_web ? (
                 <div className="flex items-start gap-2 pt-1">
-                  <ExternalLink className="h-3.5 w-3.5 mt-0.5 text-blue-500 flex-shrink-0" />
+                  <ExternalLink className="h-3.5 w-3.5 mt-0.5 text-[#F5A021] flex-shrink-0" />
                   <a
                     href={formation.site_web}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                    className="text-[#F5A021] hover:text-[#e69116] hover:underline font-semibold"
                   >
                     Voir le site de l'école
                   </a>

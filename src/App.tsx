@@ -74,7 +74,7 @@ function App() {
 
       <div className="w-96 bg-white shadow-xl overflow-y-auto flex-shrink-0 flex flex-col z-20">
 
-        <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-orange-50 to-white">
+        <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-green-50 to-white">
           <div className="flex items-start gap-4 mb-3">
             <img
               src="/illustration_ocapiat.png"
@@ -82,8 +82,8 @@ function App() {
               className="w-16 h-16 object-contain flex-shrink-0"
             />
             <div className="flex-1">
-              <h1 className="text-lg font-bold text-gray-900 leading-tight">
-                Cartographie de l'offre de <span className="text-[#EB600A]">formation</span>
+              <h1 className="text-lg font-bold text-[#74114D] leading-tight">
+                Cartographie de l'offre de <span className="text-[#F5A021]">formation</span>
               </h1>
               <p className="text-xs text-gray-600 mt-1 font-medium">
                 Branche du négoce agricole et des produits du sol
@@ -104,16 +104,16 @@ function App() {
         )}
 
         {searchInfo && !isLoading && !error && (
-          <div className="mx-4 mb-4 bg-blue-50 border border-blue-100 rounded-lg p-3 shadow-sm">
+          <div className="mx-4 mb-4 bg-[#47A152]/10 border border-[#47A152]/30 rounded-lg p-3 shadow-sm">
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-gray-500">Métier :</span>
-                <span className="font-semibold text-gray-900 text-right">{searchInfo.metier}</span>
+                <span className="text-gray-600">Métier :</span>
+                <span className="font-semibold text-[#74114D] text-right">{searchInfo.metier}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Zone :</span>
-                <span className="font-semibold text-gray-900 text-right flex items-center gap-1 justify-end">
-                   <MapPin className="h-3 w-3" /> {searchInfo.ville}
+                <span className="text-gray-600">Zone :</span>
+                <span className="font-semibold text-[#74114D] text-right flex items-center gap-1 justify-end">
+                   <MapPin className="h-3 w-3 text-[#47A152]" /> {searchInfo.ville}
                 </span>
               </div>
             </div>
@@ -122,9 +122,9 @@ function App() {
 
         {isLoading && (
           <div className="flex-1 flex flex-col items-center justify-center py-12 space-y-3">
-            <Loader2 className="h-8 w-8 text-[#EB600A] animate-spin" />
+            <Loader2 className="h-8 w-8 text-[#F5A021] animate-spin" />
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-900">Analyse en cours...</p>
+              <p className="text-sm font-medium text-[#74114D]">Analyse en cours...</p>
               <p className="text-xs text-gray-500">Interrogation des bases de données</p>
             </div>
           </div>
@@ -158,12 +158,12 @@ function App() {
           </div>
         )}
 
-        <div className="mt-auto border-t border-gray-200 p-4 bg-white">
-          <div className="flex items-center justify-center gap-4 mb-3 grayscale opacity-80 hover:grayscale-0 hover:opacity-100 transition-all">
-            <span className="text-[10px] font-bold text-gray-400 border px-1">OCAPIAT</span>
-            <span className="text-[10px] font-bold text-gray-400 border px-1">MINISTÈRE AGRI</span>
+        <div className="mt-auto border-t border-gray-200 p-4 bg-gradient-to-b from-white to-gray-50">
+          <div className="flex items-center justify-center gap-4 mb-3">
+            <span className="text-[10px] font-bold text-[#47A152] border border-[#47A152] px-2 py-0.5 rounded">OCAPIAT</span>
+            <span className="text-[10px] font-bold text-[#74114D] border border-[#74114D] px-2 py-0.5 rounded">MINISTÈRE AGRI</span>
           </div>
-          <p className="text-[9px] text-gray-400 text-center leading-relaxed">
+          <p className="text-[9px] text-gray-500 text-center leading-relaxed">
             Données validées via API Adresse Gouv & RNCP.
           </p>
         </div>
@@ -176,18 +176,18 @@ function App() {
           </div>
         )}
 
-        <div className="absolute top-4 right-4 bg-white/90 backdrop-blur rounded-lg shadow-md px-3 py-2 z-10 border border-gray-200">
-          <div className="flex gap-3 text-[10px] font-medium text-gray-600">
+        <div className="absolute top-4 right-4 bg-white/95 backdrop-blur rounded-lg shadow-lg px-4 py-2.5 z-10 border border-gray-200">
+          <div className="flex gap-4 text-[10px] font-semibold text-gray-700">
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-purple-500"></div>
+              <div className="w-2.5 h-2.5 rounded-full bg-[#74114D]"></div>
               <span>CAP (N3)</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
+              <div className="w-2.5 h-2.5 rounded-full bg-[#F5A021]"></div>
               <span>Bac (N4)</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div>
+              <div className="w-2.5 h-2.5 rounded-full bg-[#47A152]"></div>
               <span>Sup (N5+)</span>
             </div>
           </div>
