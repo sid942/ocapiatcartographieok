@@ -75,13 +75,20 @@ function App() {
       <div className="w-96 bg-white shadow-xl overflow-y-auto flex-shrink-0 flex flex-col z-20">
 
         <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-orange-50 to-white">
-          <div className="mb-3">
-            <h1 className="text-lg font-bold text-gray-900 leading-tight">
-              Cartographie de l'offre de <span className="text-[#EB600A]">formation</span>
-            </h1>
-            <p className="text-xs text-gray-600 mt-1 font-medium">
-              Branche du négoce agricole et des produits du sol
-            </p>
+          <div className="flex items-start gap-4 mb-3">
+            <img
+              src="/illustration_ocapiat.png"
+              alt="Logo Ocapiat"
+              className="w-16 h-16 object-contain flex-shrink-0"
+            />
+            <div className="flex-1">
+              <h1 className="text-lg font-bold text-gray-900 leading-tight">
+                Cartographie de l'offre de <span className="text-[#EB600A]">formation</span>
+              </h1>
+              <p className="text-xs text-gray-600 mt-1 font-medium">
+                Branche du négoce agricole et des produits du sol
+              </p>
+            </div>
           </div>
         </div>
 
