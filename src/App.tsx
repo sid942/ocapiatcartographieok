@@ -158,14 +158,34 @@ function App() {
           </div>
         )}
 
-        <div className="mt-auto border-t border-gray-200 p-4 bg-gradient-to-b from-white to-gray-50">
-          <div className="flex items-center justify-center gap-4 mb-3">
-            <span className="text-[10px] font-bold text-[#47A152] border border-[#47A152] px-2 py-0.5 rounded">OCAPIAT</span>
-            <span className="text-[10px] font-bold text-[#74114D] border border-[#74114D] px-2 py-0.5 rounded">MINISTÈRE AGRI</span>
+        <div className="mt-auto border-t border-gray-200 p-4 bg-white">
+          <div className="flex items-center justify-center gap-6 px-2">
+            <img
+              src="https://www.pagesjaunes.fr/media/agc/80/3f/66/00/00/9c/fc/23/54/c1/601a803f6600009cfc2354c1/601a803f6600009cfc2354c2.jpg"
+              alt="Logo 1"
+              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
+            />
+            <img
+              src="https://geimage.newstank.fr/image/cms/5a909ce4fc3aeffa412594bc611188ae/logo-plus-dynamique.jpg?fm=browser&w=4720&h=3345&s=24093e8d0f8cf2088814ba1c758e024c"
+              alt="Logo 2"
+              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
+            />
+            <img
+              src="https://www.ocapiat.fr/wp-content/uploads/Logo-Ocapiat-test-site-02.png"
+              alt="Ocapiat"
+              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
+            />
+            <img
+              src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQQ7hqyBE5Vp8fsDfygpmN19ktPuw2RgFy9Kg&s"
+              alt="Logo 4"
+              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
+            />
+            <img
+              src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Minist%C3%A8re_de_l%E2%80%99Agriculture_et_de_la_Souverainet%C3%A9_alimentaire.svg/1024px-Minist%C3%A8re_de_l%E2%80%99Agriculture_et_de_la_Souverainet%C3%A9_alimentaire.svg.png"
+              alt="Ministère de l'Agriculture"
+              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
+            />
           </div>
-          <p className="text-[9px] text-gray-500 text-center leading-relaxed">
-            Données validées via API Adresse Gouv & RNCP.
-          </p>
         </div>
       </div>
 
