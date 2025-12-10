@@ -65,7 +65,7 @@ export function SearchForm({ onSearch, isLoading }: SearchFormProps) {
 
       <div className="relative">
         <label className="block text-xs font-medium text-gray-700 mb-1">
-          Ville
+          Ville, département, région
         </label>
         <div className="relative">
           <input
