@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { Building2, MapPin, Award, FileText, Briefcase, ExternalLink } from 'lucide-react';
 import { Formation } from '../types';
 import 'leaflet/dist/leaflet.css';
 
@@ -36,6 +37,16 @@ const createCustomIcon = (niveau: '3' | '4' | '5' | '6') => {
     iconSize: [26, 26],
     iconAnchor: [13, 13]
   });
+};
+
+const getLevelColor = (niveau: string | null) => {
+  switch (niveau) {
+    case '3': return 'bg-[#74114D]/10 text-[#74114D] border-[#74114D]/30';
+    case '4': return 'bg-[#F5A021]/10 text-[#F5A021] border-[#F5A021]/30';
+    case '5': return 'bg-[#47A152]/10 text-[#47A152] border-[#47A152]/30';
+    case '6': return 'bg-[#47A152]/10 text-[#47A152] border-[#47A152]/30';
+    default: return 'bg-gray-100 text-gray-800 border-gray-200';
+  }
 };
 
 function MapBounds({ formations }: { formations: Formation[] }) {
@@ -105,66 +116,82 @@ export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(
             }}
           >
             <Popup>
-              <div className="p-2 min-w-[220px]">
-                <h3 className="font-bold text-sm mb-2">{formation.intitule}</h3>
+              <div className="p-3 min-w-[280px] max-w-[320px]">
+                {/* Header : Titre + Niveau */}
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <h3 className="font-bold text-gray-900 text-sm flex-1 leading-tight">
+                    {formation.intitule}
+                  </h3>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(formation.niveau)}`}>
+                    {formation.niveau && !isNaN(parseInt(formation.niveau))
+                      ? `NIV. ${formation.niveau}`
+                      : (formation.niveau || 'N/A')}
+                  </span>
+                </div>
 
-                <div className="space-y-1 text-xs">
-                  <div>
-                    <span className="font-medium text-gray-700">Organisme:</span>
-                    <p className="text-gray-600">{formation.organisme}</p>
+                {/* Détails */}
+                <div className="space-y-1.5 text-xs text-gray-600">
+
+                  {/* Organisme */}
+                  <div className="flex items-start gap-2">
+                    <Building2 className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
+                    <span className="font-medium text-gray-700">{formation.organisme}</span>
                   </div>
 
-                  <div>
-                    <span className="font-medium text-gray-700">Localisation:</span>
-                    <p className="text-gray-600">{formation.ville}, {formation.region}</p>
+                  {/* Ville + Distance */}
+                  <div className="flex items-start gap-2">
+                    <MapPin className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
+                    <div className="flex items-center gap-2">
+                      <span>{formation.ville}</span>
+                      {formation.distance_km !== undefined && formation.distance_km < 900 && (
+                        <span className="bg-gray-200 text-gray-700 px-1.5 rounded text-[10px] font-semibold">
+                          {formation.distance_km} km
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div>
-                    <span className="font-medium text-gray-700">Niveau:</span>
-                    <span className={`ml-1 px-2 py-0.5 rounded text-xs font-bold ${
-                      formation.niveau === '3' ? 'bg-[#74114D]/10 text-[#74114D]' :
-                      formation.niveau === '4' ? 'bg-[#F5A021]/10 text-[#F5A021]' :
-                      'bg-[#47A152]/10 text-[#47A152]'
-                    }`}>
-                      N{formation.niveau}
+                  {/* RNCP */}
+                  <div className="flex items-start gap-2">
+                    <Award className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
+                    <span title="Répertoire National des Certifications Professionnelles">
+                      RNCP&nbsp;: {formation.rncp && formation.rncp !== 'Non renseigné' ? (
+                        <span className="font-mono text-gray-700">{formation.rncp}</span>
+                      ) : 'Non renseigné'}
                     </span>
                   </div>
 
-                  <div>
-                    <span className="font-medium text-gray-700">RNCP:</span>
-                    <span className="ml-1 text-gray-600">
-                      {formation.rncp || 'Non renseigné'}
+                  {/* Catégorie */}
+                  <div className="flex items-start gap-2">
+                    <FileText className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
+                    <span>{formation.categorie || 'Diplôme / Titre'}</span>
+                  </div>
+
+                  {/* Alternance */}
+                  <div className="flex items-start gap-2">
+                    <Briefcase className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
+                    <span className={formation.alternance === 'Oui' ? 'text-[#47A152] font-semibold' : ''}>
+                      Alternance&nbsp;: {formation.alternance || (formation.modalite?.includes('Apprentissage') ? 'Oui' : 'Non')}
                     </span>
                   </div>
 
-                  <div>
-                    <span className="font-medium text-gray-700">Type:</span>
-                    <span className="ml-1 text-gray-600">{formation.type}</span>
-                  </div>
-
-                  <div>
-                    <span className="font-medium text-gray-700">Modalité:</span>
-                    <span className="ml-1 text-gray-600">
-                      {formation.modalite || 'Non renseigné'}
-                    </span>
-                  </div>
-
+                  {/* Lien Site Web */}
                   {formation.site_web ? (
-                    <div>
-                      <span className="font-medium text-gray-700">Site:</span>
+                    <div className="flex items-start gap-2 pt-1">
+                      <ExternalLink className="h-3.5 w-3.5 mt-0.5 text-[#F5A021] flex-shrink-0" />
                       <a
                         href={formation.site_web}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ml-1 text-[#F5A021] hover:text-[#e69116] underline font-semibold"
+                        className="text-[#F5A021] hover:text-[#e69116] hover:underline font-semibold"
                       >
-                        Voir le site
+                        Voir le site de l'école
                       </a>
                     </div>
                   ) : (
-                    <div>
-                      <span className="font-medium text-gray-700">Site:</span>
-                      <span className="ml-1 text-gray-400">Non renseigné</span>
+                    <div className="flex items-start gap-2 pt-1 opacity-50">
+                      <ExternalLink className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
+                      <span className="italic">Site web non référencé</span>
                     </div>
                   )}
                 </div>
