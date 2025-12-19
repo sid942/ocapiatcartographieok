@@ -54,7 +54,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     keywords_banned: ["bâtiment", "informatique", "réseau", "avion", "auto ", "véhicule léger"], // On évite le garage auto du coin
     priority_domains: ["MAINTENANCE_AGRI"]
   },
-  // ... Tu peux ajouter les autres métiers ici avec la même rigueur
   "technico": {
     label: "Technico-Commercial Agri",
     romes: ["D1407", "D1402"],
@@ -149,7 +148,8 @@ async function fetchLBA(config: JobProfile, lat: number, lon: number) {
         distance: item.place?.distance // Distance LBA (parfois approximative)
       },
       url: item.url,
-      romes: item.romes
+      romes: item.romes,
+      diplomaLevel: item.diplomaLevel // On garde le niveau si dispo
     }));
   } catch (e) {
     console.error("LBA Error:", e);
@@ -204,9 +204,16 @@ Deno.serve(async (req: Request) => {
         intitule: f.title,
         organisme: f.company?.name || "Organisme inconnu",
         ville: f.place.city,
+        
+        // --- AJOUT IMPORTANT : COORDONNÉES POUR LA CARTE ---
+        lat: f.place.latitude,
+        lon: f.place.longitude,
+        // ----------------------------------------------------
+        
         distance_km: trueDist,
         tags: [config.label, trueDist + " km"],
-        url: f.url
+        url: f.url,
+        niveau: f.diplomaLevel || "N/A"
       };
     });
 
