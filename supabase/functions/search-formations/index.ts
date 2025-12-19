@@ -7,11 +7,15 @@ const corsHeaders = {
 };
 
 // ==================================================================================
-// 1. CONFIGURATION ROME (Codes pour l'API État LBA)
+// 1. SOURCING (Codes ROME) - CORRIGÉ SELON AUDIT
 // ==================================================================================
 const METIER_TO_ROME: Record<string, string[]> = {
     "technico": ["D1407", "D1402", "D1403"], 
-    "silo": ["A1416", "A1101", "I1304", "I1309"], 
+    
+    // SILO : On ne garde QUE la Conduite d'engins et le Silo pur.
+    // On retire I1304 (Maintenance Méca) pour éviter toute pollution industrielle.
+    "silo": ["A1416", "A1101"], 
+    
     "chauffeur": ["N4101", "N4105", "A1101"], 
     "responsable_silo": ["A1301", "A1303", "I1102", "H1302"], 
     "logistique": ["N1301", "N1302"], 
@@ -25,83 +29,68 @@ const METIER_TO_ROME: Record<string, string[]> = {
 };
 
 // ==================================================================================
-// 2. RÈGLES MÉTIER & DÉFINITIONS (POUR GUIDER L'IA)
+// 2. MATRICE DE FILTRAGE (DOMAINES AUTORISÉS)
 // ==================================================================================
-// definition : Sert à expliquer le métier à l'IA pour qu'elle ne confonde pas "Silo" et "Ferme"
-const METIERS_RULES: Record<string, { definition: string, priorites: string[], interdits: string[], niveaux: string[] }> = {
-    silo: {
-        definition: "Travail en SILO CÉRÉALIER : réception, séchage, tri, stockage, expédition des grains. Pas d'élevage ni de gestion de ferme globale.",
-        priorites: ["silo", "stockage", "céréale", "grain", "tri", "séchage", "manutention", "coopérative", "cqp", "cs", "gdea", "agroéquipement"],
-        interdits: ["nucléaire", "aéronautique", "spatial", "bureautique", "chimie", "informatique", "web", "élevage", "soigneur"],
-        niveaux: ["3", "4", "5"] 
-    },
-    responsable_silo: {
-        definition: "Management d'un site de stockage de grains. Gestion de production, qualité, logistique et encadrement d'équipe.",
-        priorites: ["silo", "céréale", "grain", "stockage", "logistique agricole", "qualité grain", "cfppa", "gdea", "agronomie", "production"],
-        interdits: ["eau", "piscine", "paysage", "forêt", "animal", "nucléaire", "aéro", "informatique"],
-        niveaux: ["5", "6"] 
-    },
-    chauffeur: {
-        definition: "Conduite de poids lourds ou d'engins agricoles pour le transport de marchandises.",
-        priorites: ["routier", "conduite", "transport", "marchandises", "agricole", "engin", "fimo", "super lourd"],
-        interdits: ["ligne","voyageurs", "bus", "commun", "taxi", "ambulance", "vtc"],
-        niveaux: ["3", "4"] 
-    },
-    technico: {
-        definition: "Vente de produits techniques auprès de professionnels (B2B).",
-        priorites: ["technico", "commercial", "vente", "négociation", "client", "business", "force de vente"],
-        interdits: ["coiffure", "esthétique", "immobilier", "tourisme"],
-        niveaux: ["5", "6"] 
-    },
-    logistique: {
-        definition: "Organisation des flux de marchandises et gestion d'entrepôt.",
-        priorites: ["logistique", "supply", "chaîne", "transport", "flux", "entrepôt"],
-        interdits: [],
-        niveaux: ["5", "6"]
-    },
-    magasinier: {
-        definition: "Réception, stockage et préparation de commandes.",
-        priorites: ["magasinier", "préparateur", "commande", "logistique", "cariste", "caces", "stock"],
-        interdits: [],
-        niveaux: ["3", "4"]
-    },
-    maintenance: {
-        definition: "Entretien et réparation d'équipements industriels et machines.",
-        priorites: ["maintenance", "industrielle", "systèmes", "électrotechnique", "mécanique", "automatisme", "melec", "mspc"],
-        interdits: ["informatique", "réseaux", "télécom", "véhicule léger", "automobile", "nucléaire", "aéro"],
-        niveaux: ["3", "4", "5"]
-    },
-    qualite: {
-        definition: "Contrôle de la qualité des produits alimentaires et respect des normes.",
-        priorites: ["qualité", "laboratoire", "analyse", "contrôle", "alimentaire", "biologie", "bio", "qhse"],
-        interdits: ["aéronautique", "médical", "soin"],
-        niveaux: ["5", "6"]
-    },
-    agreeur: {
-        definition: "Analyse et classement des grains à la réception (Silo).",
-        priorites: ["qualité", "agricole", "céréale", "grain", "laboratoire", "agronomie", "classement"],
-        interdits: [],
-        niveaux: ["4", "5"]
-    },
-    ligne: {
-        definition: "Surveillance et pilotage de machines de production industrielle.",
-        priorites: ["ligne", "pilote", "conducteur", "production", "procédés", "industriel"],
-        interdits: ["bus", "routier"],
-        niveaux: ["3", "4", "5"]
-    },
-    culture: {
-        definition: "Suivi technique des cultures végétales (Agronomie).",
-        priorites: ["agronomie", "végétal", "culture", "agricole", "exploitation", "technicien"],
-        interdits: ["animal", "élevage", "cheval", "soigneur"],
-        niveaux: ["5", "6"]
-    },
-    export: {
-        definition: "Commerce international et gestion des échanges import-export.",
-        priorites: ["international", "export", "anglais", "commerce", "échange", "import"],
-        interdits: [],
-        niveaux: ["5", "6"]
-    }
+const METIERS_DOMAINES: Record<string, string[]> = {
+    // SILO : Verrouillage total sur l'Agricole.
+    silo: ["AGRI_COEUR", "AGRI_TECH", "AGRI_CONDUITE"], 
+    
+    responsable_silo: ["AGRI_COEUR", "AGRI_ENCADREMENT", "AGRI_TECH", "INDUS_MANAGEMENT"],
+    chauffeur: ["TRANSPORT_MARCHANDISE", "AGRI_CONDUITE"],
+    technico: ["COMMERCE_TECH", "COMMERCE_AGRI", "AGRI_TECH"], 
+    logistique: ["LOGISTIQUE_ENCADREMENT", "LOGISTIQUE_OPS"],
+    magasinier: ["LOGISTIQUE_OPS", "AGRI_COEUR"], 
+    maintenance: ["MAINTENANCE_INDUS", "MAINTENANCE_AGRI", "ELEC_INDUS"], 
+    qualite: ["QUALITE_BIO", "AGRI_COEUR", "AGRI_ENCADREMENT"],
+    agreeur: ["AGRI_COEUR", "QUALITE_BIO"],
+    ligne: ["PRODUCTION_INDUS", "AGRI_TECH"],
+    culture: ["AGRI_COEUR", "AGRI_ENCADREMENT"],
+    export: ["COMMERCE_INT", "COMMERCE_AGRI"]
 };
+
+// ==================================================================================
+// 3. CLASSIFICATEUR DE DOMAINE (LE CERVEAU)
+// ==================================================================================
+function detecterDomaine(intitule: string, organisme: string): string {
+    const txt = (intitule + " " + organisme).toLowerCase();
+
+    // --- 1. DOMAINES AGRICOLES (Prioritaires) ---
+    if (txt.match(/agent de silo|stockage des grains|manutention des grains|réception.*grain|céréalier/)) return "AGRI_COEUR";
+    if (txt.match(/cqp|cs /) && txt.match(/silo|agri|grain|coopérative/)) return "AGRI_COEUR";
+    
+    // Conduite et Gestion
+    if (txt.match(/cgea|acse|conduite.*entreprise agricole|responsable.*entreprise agricole|bprea/)) return "AGRI_ENCADREMENT";
+    if (txt.match(/productions végétales|agronomie|grande culture|semence/)) return "AGRI_COEUR";
+
+    // Technique Agricole
+    if (txt.match(/gdea|agroéquipement|matériel agricole|machinisme|conducteur.*engin agricole/)) return "AGRI_TECH";
+    if (txt.match(/conduite.*machine.*agricole|tractoriste/)) return "AGRI_CONDUITE";
+
+    // --- 2. DOMAINES INTERDITS / DANGEREUX ---
+    
+    // Électricité Bâtiment (L'ennemi n°1 à Niort)
+    if (txt.match(/bâtiment|domotique|habitat|communicant|installateur|équipement.*électrique/)) return "ELEC_BATIMENT";
+    if (txt.match(/bp électricien|cap électricien|métiers de l'électricité/)) return "ELEC_BATIMENT";
+
+    // Maintenance Industrielle Générique
+    if (txt.match(/mspc|maintenance des systèmes|mi |mei |maintenance industrielle/)) return "MAINTENANCE_INDUS";
+    if (txt.match(/électrotechnique|melec|cira|automatisme/)) return "ELEC_INDUS";
+
+    // --- 3. AUTRES DOMAINES ---
+    if (txt.match(/transport routier|super lourd|fimo|fco|conducteur routier/)) return "TRANSPORT_MARCHANDISE";
+    if (txt.match(/technico|négociation|force de vente/)) return "COMMERCE_TECH";
+    if (txt.match(/commerce|vente|b2b/)) return "COMMERCE_GEN";
+    if (txt.match(/logistique|supply|flux/)) {
+        if (txt.match(/responsable|master|but|manager/)) return "LOGISTIQUE_ENCADREMENT";
+        return "LOGISTIQUE_OPS";
+    }
+    if (txt.match(/magasinier|cariste|caces|préparateur/)) return "LOGISTIQUE_OPS";
+    if (txt.match(/qualité|laboratoire|bio|analyse/)) return "QUALITE_BIO";
+    if (txt.match(/pilote|ligne|procédés|production/)) return "PRODUCTION_INDUS";
+    if (txt.match(/international|export|import/)) return "COMMERCE_INT";
+
+    return "AUTRE";
+}
 
 function detecterMetierKey(input: string): string {
     const m = input.toLowerCase();
@@ -119,12 +108,12 @@ function detecterMetierKey(input: string): string {
 }
 
 // ==================================================================================
-// 3. FONCTIONS API
+// 4. API FETCHING
 // ==================================================================================
 
-// LBA : API État (Fiable sur distance et existence, mais biais CGEA)
 async function fetchLBA(romes: string[], lat: number, lon: number) {
-    const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=100&caller=ocapiat_app`;
+    // On garde un rayon large (150km) pour trouver l'agricole, le filtre fera le tri
+    const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes.join(",")}&latitude=${lat}&longitude=${lon}&radius=150&caller=ocapiat_app`;
     try {
         const res = await fetch(url);
         if (!res.ok) return [];
@@ -156,29 +145,26 @@ async function fetchLBA(romes: string[], lat: number, lon: number) {
     } catch { return []; }
 }
 
-// IA : Perplexity (Pour trouver les CQP/CS spécifiques que LBA rate)
 async function fetchPerplexity(metierKey: string, promptZone: string, apiKey: string, isRescueMode = false) {
     const contextPrompt = isRescueMode 
-        ? "URGENT: Cherche dans TOUTE LA RÉGION et départements voisins. Trouve impérativement les CFPPA et MFR."
+        ? "URGENT: Cherche dans TOUTE LA RÉGION. Trouve impérativement les CFPPA, MFR et Lycées Agricoles."
         : "Cherche autour de la ville indiquée.";
 
-    const rules = METIERS_RULES[metierKey];
+    // On passe les domaines autorisés à l'IA pour qu'elle s'auto-censure
+    const authDomains = METIERS_DOMAINES[metierKey];
     
-    // On injecte la définition précise du métier pour guider l'IA
     const systemPrompt = `Tu es un expert en formation agricole.
-    MÉTIER CIBLE : ${rules.definition}
+    MÉTIER CIBLE : ${metierKey.toUpperCase()}
+    DOMAINES STRICTEMENT AUTORISÉS : ${authDomains.join(", ")}.
+    ${contextPrompt}
+    
+    RÈGLE D'OR : Ne propose QUE des formations qui correspondent à ces domaines.
+    Refuse tout ce qui est Bâtiment, Électricité générale, Nucléaire ou Aéronautique.
+    
+    JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "niveau": "3/4/5/6" }] }`;
 
-    RÈGLES DE RECHERCHE :
-    1. Priorité absolue aux formations contenant : ${rules.priorites.join(", ")}.
-    2. Exclure formellement : ${rules.interdits.join(", ")}.
-    3. Niveaux cibles : ${rules.niveaux.join(", ")}.
-    4. ${contextPrompt}
-
-    JSON STRICT: { "formations": [{ "intitule": "", "organisme": "", "ville": "", "niveau": "3/4/5/6", "site_web": "https://..." }] }
-    IMPORTANT: Pour chaque formation, cherche et inclus l'URL du site web de l'établissement si disponible.`;
-
-    const userPrompt = `Trouve 5 établissements spécifiques pour "${metierKey}" vers "${promptZone}".
-    Concentre-toi sur les CQP, CS, et Titres Pro spécifiques au métier.
+    const userPrompt = `Trouve 5 établissements pour "${metierKey}" vers "${promptZone}".
+    Privilégie le Scolaire et le Continue (hors apprentissage).
     JSON uniquement.`;
 
     try {
@@ -203,14 +189,13 @@ async function fetchPerplexity(metierKey: string, promptZone: string, apiKey: st
             alternance: "Non",
             categorie: "Diplôme",
             distance_km: 999,
-            site_web: f.site_web || null,
             source: "IA"
         }));
     } catch { return []; }
 }
 
 // ==================================================================================
-// 4. LOGIQUE PRINCIPALE
+// 5. HANDLER PRINCIPAL
 // ==================================================================================
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -224,62 +209,51 @@ Deno.serve(async (req: Request) => {
     let lat = 0, lon = 0;
     let villeRef = ville;
     let regionContext = "";
-
-    // Essayer d'abord de chercher un département
-    const depRep = await fetch(`https://geo.api.gouv.fr/departements?nom=${encodeURIComponent(ville)}&fields=nom,code,centre`);
-    const depData = await depRep.json();
-
-    if (depData.length > 0 && depData[0].centre?.coordinates) {
-        // C'est un département avec coordonnées valides
-        const dep = depData[0];
-        lat = dep.centre.coordinates[1];
-        lon = dep.centre.coordinates[0];
-        villeRef = `${dep.nom} (${dep.code})`;
-        regionContext = dep.nom;
+    const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
+    const geoData = await geoRep.json();
+    if (geoData.features?.length > 0) {
+        const f = geoData.features[0];
+        lon = f.geometry.coordinates[0];
+        lat = f.geometry.coordinates[1];
+        villeRef = `${f.properties.city} (${f.properties.postcode})`;
+        regionContext = f.properties.context || "France";
     } else {
-        // Sinon chercher une ville/commune
-        const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
-        const geoData = await geoRep.json();
-        if (geoData.features?.length > 0) {
-            const f = geoData.features[0];
-            lon = f.geometry.coordinates[0];
-            lat = f.geometry.coordinates[1];
-            villeRef = `${f.properties.city} (${f.properties.postcode})`;
-            regionContext = f.properties.context || "France";
-        } else {
-            throw new Error("Ville introuvable.");
-        }
+        throw new Error("Ville introuvable.");
     }
 
-    // 2. RECHERCHE HYBRIDE INITIALE
+    // 2. SOURCING HYBRIDE
     const metierKey = detecterMetierKey(metier);
     const romes = METIER_TO_ROME[metierKey];
-    const rules = METIERS_RULES[metierKey];
-    const isAgriMetier = ["silo", "culture", "agreeur", "responsable_silo", "chauffeur"].includes(metierKey);
-
+    
     const [lbaResults, iaResults] = await Promise.all([
         fetchLBA(romes, lat, lon),
-        perplexityApiKey && isAgriMetier ? fetchPerplexity(metierKey, villeRef, perplexityApiKey, false) : []
+        perplexityApiKey ? fetchPerplexity(metierKey, villeRef, perplexityApiKey, false) : []
     ]);
 
     let allFormations = [...lbaResults, ...iaResults];
 
-    // 3. CHECK QUALITÉ ("Rescue Mode")
-    // On vérifie si on a trouvé des formations vraiment spécifiques (CQP, CS, Stockage...)
-    // Sinon on est probablement noyé dans le CGEA ou la Maintenance générique.
-    const hasSpecificAgri = allFormations.some(f => {
-        const txt = ((f.intitule || "") + " " + (f.organisme || "")).toLowerCase();
-        // On cherche les mots clés FORTS (stockage, silo, grain, cqp, cs)
-        const strongKeywords = ["stockage", "silo", "grain", "cqp", "cs ", "gdea"];
-        return strongKeywords.some(k => txt.includes(k));
+    // 3. FILTRAGE PAR DOMAINE (Le Verrou de Sécurité)
+    const domainesAutorises = METIERS_DOMAINES[metierKey] || [];
+    
+    let filteredFormations = allFormations.filter(f => {
+        const domaine = detecterDomaine(f.intitule, f.organisme);
+        // Si le domaine détecté n'est pas dans la liste autorisée pour ce métier -> POUBELLE
+        return domainesAutorises.includes(domaine);
     });
 
-    if (!hasSpecificAgri && isAgriMetier && perplexityApiKey) {
-        console.log("🚨 RESCUE MODE : Pas de CQP/CS trouvé, on relance l'IA large...");
+    // 4. RESCUE MODE (Si le filtre a tout tué)
+    // Utile si on est dans un désert agricole : on force l'IA à chercher plus loin avec les bons critères
+    if (filteredFormations.length === 0 && perplexityApiKey) {
+        console.log("🚨 RESCUE MODE : Aucun résultat valide, relance régionale...");
         const rescueResults = await fetchPerplexity(metierKey, regionContext, perplexityApiKey, true);
         
-        // On tente de géocoder les résultats IA pour avoir une distance
-        for (const f of rescueResults) {
+        const validRescue = rescueResults.filter(f => {
+            const d = detecterDomaine(f.intitule, f.organisme);
+            return domainesAutorises.includes(d);
+        });
+        
+        // Recalcul distance
+        for (const f of validRescue) {
             try {
                 const rGeo = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(f.organisme + " " + f.ville)}&limit=1`);
                 const dGeo = await rGeo.json();
@@ -289,49 +263,11 @@ Deno.serve(async (req: Request) => {
                 }
             } catch {}
         }
-        allFormations = [...allFormations, ...rescueResults];
+        filteredFormations = [...filteredFormations, ...validRescue];
     }
 
-    // 4. FILTRAGE & SCORING FINAL
-    const filteredFormations = allFormations.filter(f => {
-        let score = 0;
-        const txt = ((f.intitule || "") + " " + (f.organisme || "")).toLowerCase();
-        
-        if (rules.interdits.some(bad => txt.includes(bad))) return false;
-        
-        // Bonus si mot-clé prioritaire
-        if (rules.priorites.some(good => txt.includes(good))) score += 1;
-        // Bonus si niveau OK
-        if (f.niveau === "N/A" || rules.niveaux.includes(f.niveau)) score += 1;
-        
-        score += 1; // Bonus présence
-
-        return score >= 2;
-    });
-
-    // 5. TRI FINAL (Les "Vrais" Agricoles d'abord, la technique ensuite)
-    filteredFormations.sort((a, b) => {
-        const txtA = ((a.intitule || "") + " " + (a.organisme || "")).toLowerCase();
-        const txtB = ((b.intitule || "") + " " + (b.organisme || "")).toLowerCase();
-        
-        // On donne un poids énorme aux mots clés "Silo", "Stockage", "CQP"
-        const strongKeywords = ["silo", "stockage", "grain", "cqp", "cs ", "gdea"];
-        const aIsCore = strongKeywords.some(k => txtA.includes(k));
-        const bIsCore = strongKeywords.some(k => txtB.includes(k));
-
-        if (aIsCore && !bIsCore) return -1;
-        if (!aIsCore && bIsCore) return 1;
-
-        // Sinon tri par priorité générale
-        const aIsPriority = rules.priorites.some(p => txtA.includes(p));
-        const bIsPriority = rules.priorites.some(p => txtB.includes(p));
-        if (aIsPriority && !bIsPriority) return -1;
-        if (!aIsPriority && bIsPriority) return 1;
-
-        // Enfin tri par distance
-        return a.distance_km - b.distance_km;
-    });
-
+    // 5. TRI FINAL
+    filteredFormations.sort((a, b) => a.distance_km - b.distance_km);
     const finalFormations = filteredFormations.slice(0, 20);
 
     return new Response(JSON.stringify({
@@ -345,7 +281,6 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-// Helper distance
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
