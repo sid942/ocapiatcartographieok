@@ -229,8 +229,8 @@ Deno.serve(async (req: Request) => {
     const depRep = await fetch(`https://geo.api.gouv.fr/departements?nom=${encodeURIComponent(ville)}&fields=nom,code,centre`);
     const depData = await depRep.json();
 
-    if (depData.length > 0) {
-        // C'est un département
+    if (depData.length > 0 && depData[0].centre?.coordinates) {
+        // C'est un département avec coordonnées valides
         const dep = depData[0];
         lat = dep.centre.coordinates[1];
         lon = dep.centre.coordinates[0];
