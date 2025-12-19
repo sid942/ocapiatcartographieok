@@ -1,11 +1,16 @@
 import { useState, useRef } from 'react';
 import { Loader2, AlertCircle, MapPin } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js'; // Import Supabase
 import { SearchForm } from './components/SearchForm';
 import { FormationMap, FormationMapRef } from './components/FormationMap';
 import { FormationList } from './components/FormationList';
 import { Formation, Metier } from './types';
-import { searchFormations } from './services/perplexity';
-import { geocodeCity } from './services/nominatim';
+
+// --- CONFIGURATION SUPABASE (A déplacer idéalement dans src/lib/supabase.ts) ---
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// -----------------------------------------------------------------------------
 
 function App() {
   const mapRef = useRef<FormationMapRef>(null);
@@ -14,10 +19,12 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
+  // Pour l'affichage des infos de recherche (Debug & User Feedback)
   const [searchInfo, setSearchInfo] = useState<{
     metier: string;
     ville: string;
-    niveau: string;
+    rayon: string;
+    count: number;
   } | null>(null);
 
   const handleSearch = async (
@@ -31,33 +38,44 @@ function App() {
     setHasSearched(true);
 
     try {
-      const result = await searchFormations(metier, ville, niveau);
-
-      const formationsWithCoords = await Promise.all(
-        result.formations.map(async (formation) => {
-          const coords = await geocodeCity(formation.ville);
-          return {
-            ...formation,
-            lat: coords?.lat,
-            lon: coords?.lon
-          };
-        })
-      );
-
-      setFormations(formationsWithCoords);
-
-      setSearchInfo({
-        metier: result.metier_normalise,
-        ville: result.ville_reference,
-        niveau: niveau
+      // 1. APPEL AU "CERVEAU" (Backend Supabase)
+      // On ne fait plus aucun calcul ici, on fait confiance au backend.
+      const { data, error: functionError } = await supabase.functions.invoke('search-formations', {
+        body: { metier, ville } 
       });
+
+      if (functionError) throw new Error(functionError.message || "Erreur de connexion au serveur");
+      if (data.error) throw new Error(data.error);
+
+      // 2. RÉCEPTION DES DONNÉES PROPRES
+      // Le backend nous envoie déjà tout filtré, trié, et géocodé.
+      const results = data.formations || [];
+
+      setFormations(results);
+
+      // 3. MISE A JOUR DES INFOS INTELLIGENTES
+      setSearchInfo({
+        metier: data.metier_detecte, // Ex: "Agent de Silo" (même si user a tapé "silo")
+        ville: data.ville_reference,
+        rayon: data.rayon_applique,
+        count: data.count
+      });
+
+      // 4. ZOOM AUTOMATIQUE SUR LA PREMIÈRE FORMATION
+      if (results.length > 0 && mapRef.current) {
+         // On laisse un petit délai pour que la map charge les points
+         setTimeout(() => {
+             const first = results[0];
+             if (first.lat && first.lon) {
+                 mapRef.current?.flyToFormation(first);
+             }
+         }, 500);
+      }
 
     } catch (err) {
       console.error('Search error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Erreur inconnue';
-      setError(
-        `Une erreur est survenue lors de la recherche: ${errorMessage}`
-      );
+      setError(`Erreur système : ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -72,6 +90,7 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
 
+      {/* --- SIDEBAR --- */}
       <div className="w-96 bg-white shadow-xl overflow-y-auto flex-shrink-0 flex flex-col z-20">
 
         <div className="p-6 border-b border-gray-200 bg-gradient-to-br from-green-50 to-white">
@@ -83,10 +102,10 @@ function App() {
             />
             <div className="flex-1">
               <h1 className="text-lg font-bold text-[#74114D] leading-tight">
-                Cartographie de l'offre de <span className="text-[#F5A021]">formation</span>
+                Cartographie <span className="text-[#F5A021]">Intelligente</span>
               </h1>
               <p className="text-xs text-gray-600 mt-1 font-medium">
-                Branche du négoce agricole et des produits du sol
+                Négoce Agricole • Filtre strict
               </p>
             </div>
           </div>
@@ -103,18 +122,24 @@ function App() {
           </div>
         )}
 
+        {/* --- ZONE D'INFO INTELLIGENTE --- */}
         {searchInfo && !isLoading && !error && (
           <div className="mx-4 mb-4 bg-[#47A152]/10 border border-[#47A152]/30 rounded-lg p-3 shadow-sm">
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Métier :</span>
-                <span className="font-semibold text-[#74114D] text-right">{searchInfo.metier}</span>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between items-center border-b border-[#47A152]/20 pb-1">
+                <span className="text-gray-600">Métier Identifié :</span>
+                <span className="font-bold text-[#74114D] text-right">{searchInfo.metier}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Zone :</span>
-                <span className="font-semibold text-[#74114D] text-right flex items-center gap-1 justify-end">
-                   <MapPin className="h-3 w-3 text-[#47A152]" /> {searchInfo.ville}
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600">Zone de recherche :</span>
+                <span className="font-semibold text-gray-800 text-right flex items-center gap-1 justify-end">
+                   <MapPin className="h-3 w-3 text-[#47A152]" /> 
+                   {searchInfo.ville}
                 </span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] text-gray-500 italic">
+                  <span>Rayon strict appliqué :</span>
+                  <span>{searchInfo.rayon}</span>
               </div>
             </div>
           </div>
@@ -124,14 +149,17 @@ function App() {
           <div className="flex-1 flex flex-col items-center justify-center py-12 space-y-3">
             <Loader2 className="h-8 w-8 text-[#F5A021] animate-spin" />
             <div className="text-center">
-              <p className="text-sm font-medium text-[#74114D]">Analyse en cours...</p>
-              <p className="text-xs text-gray-500">Interrogation des bases de données</p>
+              <p className="text-sm font-medium text-[#74114D]">Analyse Géographique...</p>
+              <p className="text-xs text-gray-500">Filtrage des formations non pertinentes</p>
             </div>
           </div>
         )}
 
         {!isLoading && formations.length > 0 && (
           <div className="px-4 pb-4 animate-in fade-in duration-500">
+            <div className="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                {formations.length} Résultat(s) validé(s)
+            </div>
             <FormationList
               formations={formations}
               onFormationClick={handleFormationClick}
@@ -139,80 +167,32 @@ function App() {
           </div>
         )}
 
-        {!isLoading && formations.length === 0 && !error && !hasSearched && (
-          <div className="px-4 py-12 text-center opacity-60">
-            <p className="text-sm text-gray-500">
-              Lancez une recherche pour voir les formations apparaître ici et sur la carte.
-            </p>
-          </div>
-        )}
-
-        {!isLoading && formations.length === 0 && !error && hasSearched && searchInfo && (
-          <div className="px-4 py-8 text-center bg-gray-50 mx-4 rounded-lg border border-dashed border-gray-300">
+        {!isLoading && formations.length === 0 && !error && hasSearched && (
+           <div className="px-4 py-8 text-center bg-gray-50 mx-4 rounded-lg border border-dashed border-gray-300">
             <p className="text-sm font-bold text-gray-900 mb-1">
-              Aucune formation trouvée
+              Aucun résultat strict trouvé
             </p>
             <p className="text-xs text-gray-500">
-              Essayez d'élargir la zone ou de changer de métier.
+              Le filtre de sécurité n'a trouvé aucune formation correspondant exactement aux critères de {searchInfo?.metier || "ce métier"} dans le rayon imparti.
             </p>
           </div>
         )}
-
+        
+        {/* Footer Logos */}
         <div className="mt-auto border-t border-gray-200 p-4 bg-white">
-          <div className="flex items-center justify-center gap-6 px-2">
-            <img
-              src="https://www.pagesjaunes.fr/media/agc/80/3f/66/00/00/9c/fc/23/54/c1/601a803f6600009cfc2354c1/601a803f6600009cfc2354c2.jpg"
-              alt="Logo 1"
-              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
-            />
-            <img
-              src="https://geimage.newstank.fr/image/cms/5a909ce4fc3aeffa412594bc611188ae/logo-plus-dynamique.jpg?fm=browser&w=4720&h=3345&s=24093e8d0f8cf2088814ba1c758e024c"
-              alt="Logo 2"
-              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
-            />
-            <img
-              src="https://www.ocapiat.fr/wp-content/uploads/Logo-Ocapiat-test-site-02.png"
-              alt="Ocapiat"
-              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
-            />
-            <img
-              src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQQ7hqyBE5Vp8fsDfygpmN19ktPuw2RgFy9Kg&s"
-              alt="Logo 4"
-              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
-            />
-            <img
-              src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Minist%C3%A8re_de_l%E2%80%99Agriculture_et_de_la_Souverainet%C3%A9_alimentaire.svg/1024px-Minist%C3%A8re_de_l%E2%80%99Agriculture_et_de_la_Souverainet%C3%A9_alimentaire.svg.png"
-              alt="Ministère de l'Agriculture"
-              className="h-10 w-auto object-contain grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all"
-            />
-          </div>
+             {/* ... (Garder vos logos existants ici) ... */}
+             <div className="text-[10px] text-center text-gray-400 mt-2">
+                 Propulsé par Algorithme de Filtrage ROME V2
+             </div>
         </div>
       </div>
 
+      {/* --- MAP --- */}
       <div className="flex-1 relative bg-gray-200">
-
         {isLoading && (
           <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-30 flex items-center justify-center">
           </div>
         )}
-
-        <div className="absolute top-4 right-4 bg-white/95 backdrop-blur rounded-lg shadow-lg px-4 py-2.5 z-10 border border-gray-200">
-          <div className="flex gap-4 text-[10px] font-semibold text-gray-700">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-[#74114D]"></div>
-              <span>CAP (N3)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-[#F5A021]"></div>
-              <span>Bac (N4)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-[#47A152]"></div>
-              <span>Sup (N5+)</span>
-            </div>
-          </div>
-        </div>
-
         <FormationMap
           ref={mapRef}
           formations={formations}
