@@ -8,7 +8,7 @@ import {
 
 /**
  * OCAPIAT - Search Formations (LBA)
- * V3.3 PRO + Perplexity Enrichment
+ * V3.3 PRO + Perplexity Enrichment (safe)
  *
  * ✅ Anti-0 (on essaie toujours d'en trouver)
  * ✅ MAIS on refuse les "hontes" (chevaux / routier pur / hors sujet total)
@@ -17,11 +17,10 @@ import {
  * ✅ Raisons "Pourquoi ?" humaines (pas de jargon ROME)
  * ✅ Enrichissement Perplexity invisible si < 10 résultats ou distance élevée
  *
- * Corrections demandées :
- * 1) Anti-honte : en relaxed/fallback, on NE sort plus de score ridicule (ex: 2) juste pour remplir.
- *    -> seuil ABSOLU de pertinence, sinon on renvoie un résultat vide + warning propre.
- * 2) Chauffeur Agricole : on évite routier marchandises "pur" + on bannit chevaux/attelage.
- * 3) Perplexity : complément invisible avec 2 URLs vérifiées, pas de doublons.
+ * Fix Perplexity (zéro erreur) :
+ * - alternance/modalite : jamais "Oui/Non" inventé => "Non renseigné"
+ * - distance : pas de non-géo, pas d'énorme lointain => filtrage dur
+ * - score : Perplexity reste un complément => score abaissé
  */
 
 const corsHeaders = {
@@ -54,11 +53,6 @@ interface JobProfile {
   banned_keywords: string[];
   banned_phrases: string[];
 
-  /**
-   * Si défini : garde-fou contexte.
-   * -> en STRICT, on exige au moins 1 hit contexte OU un signal fort (strong/syn).
-   * -> en RELAXED/FALLBACK, on pénalise fortement si 0 hit.
-   */
   context_keywords?: string[];
 
   min_score: number;
@@ -72,21 +66,23 @@ interface JobProfile {
   hard_distance_cap_km?: number;
 }
 
-/**
- * ✅ Seuil ABSOLU anti-honte :
- * En dessous, c'est trop bancal (genre score=2 => "ROME seul + hors contexte").
- * Donc : même en fallback, on ne l'affiche pas.
- */
 const ABSOLUTE_MIN_SCORE = 8;
+const MAX_WHY_REASONS = 3;
 
 /**
- * ✅ Quand on affiche le "Pourquoi ?", on veut :
- * - simple
- * - positif
- * - pas de jargon ROME
- * - pas de messages négatifs ("hors contexte") qui font peur/ honte
+ * ✅ Perplexity = complément
+ * (score volontairement bas pour ne jamais passer devant de bons résultats LBA)
  */
-const MAX_WHY_REASONS = 3;
+const PERPLEXITY_SCORE = 15;
+
+/**
+ * ✅ Cap distance dur Perplexity :
+ * - si config.hard_distance_cap_km existe => on s'aligne
+ * - sinon on met une valeur raisonnable
+ */
+function getPerplexityHardCap(config: JobProfile) {
+  return typeof config.hard_distance_cap_km === "number" ? config.hard_distance_cap_km : 450;
+}
 
 const BANNED_GLOBAL_RAW = [
   "surete",
@@ -130,12 +126,6 @@ const BANNED_GLOBAL_RAW = [
   "notaire",
 ];
 
-/**
- * NOTE IMPORTANT :
- * Pour "Chauffeur Agricole", le problème venait surtout du ROME transport routier marchandises.
- * -> On le passe en fallback (secours), pas dans le strict.
- * -> On durcit le contexte agri + on bannit chevaux/attelages.
- */
 const JOB_CONFIG: Record<string, JobProfile> = {
   silo: {
     key: "silo",
@@ -161,15 +151,9 @@ const JOB_CONFIG: Record<string, JobProfile> = {
   chauffeur: {
     key: "chauffeur",
     label: "Chauffeur Agricole",
-
-    // ✅ Strict = uniquement agricole (on enlève le ROME transport routier du strict)
     romes: ["A1101"],
-
-    // ✅ Secours = routier + logistique (mais filtré fort par contexte / score)
     fallback_romes: ["N4101", "N4102", "N4105", "N1303"],
-
     radius_km: 120,
-
     strong_keywords: [
       "tracteur",
       "benne",
@@ -190,20 +174,14 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["conducteur tracteur", "conduite d engins agricoles", "transport agricole", "chauffeur agricole"],
     weak_keywords: ["transport", "livraison", "route", "logistique"],
-
-    // ✅ On évite voyageurs + chevaux + attelage
     banned_keywords: ["bus", "taxi", "ambulance", "vtc", "tourisme", "voyageurs", "cheval", "chevaux", "attelage", "attelages", "equitation", "equestre"],
     banned_phrases: ["transport de personnes", "chauffeur de bus", "conduite d attelages", "attelages de chevaux"],
-
-    // ✅ garde-fou contexte agri
     context_keywords: ["agricole", "tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "cereales", "recolte", "engins", "machinisme"],
-
     min_score: 34,
     relaxed_min_score: 20,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 60,
-
     soft_distance_cap_km: 180,
     hard_distance_cap_km: 550,
   },
@@ -534,10 +512,7 @@ type ScoredFormation = {
   distanceKm: number | null;
   score: number;
 
-  // raisons internes (debug)
   _reasonsInternal: string[];
-
-  // raisons affichables (Pourquoi ?)
   reasons: string[];
 
   ctxHits: number;
@@ -568,12 +543,6 @@ function makeDedupKey(title: string, company: string, city: string | null) {
   return `${cleanText(title)}|${cleanText(company)}|${cleanText(city || "")}`;
 }
 
-/**
- * Transforme les signaux internes en raisons HUMAINES.
- * - On ne montre pas "ROME"
- * - On ne montre pas "hors contexte"
- * - On garde du positif + proximité
- */
 function buildUserReasons(args: {
   hasRome: boolean;
   ctxHits: number;
@@ -586,15 +555,12 @@ function buildUserReasons(args: {
 
   const reasons: string[] = [];
 
-  // Pertinence métier (contexte / mots-clés)
   if (ctxHits > 0 || strongHits > 0 || synHits > 0) {
     reasons.push("Correspond bien au métier recherché");
   } else if (hasRome) {
-    // au pire : neutre, mais pas technique
     reasons.push("Proche du métier recherché");
   }
 
-  // Proximité
   if (typeof dist === "number") {
     if (dist <= 15) reasons.push("Très proche de votre zone");
     else if (dist <= 40) reasons.push("Proche de votre zone");
@@ -604,18 +570,11 @@ function buildUserReasons(args: {
     }
   }
 
-  // Fallback de sécurité : au moins une raison "safe"
   if (reasons.length === 0) reasons.push("Résultat pertinent");
 
   return reasons.slice(0, MAX_WHY_REASONS);
 }
 
-/**
- * Règle spéciale anti-honte Chauffeur Agricole :
- * - si texte routier/marchandises/longue distance
- * - et aucun signal agri
- * -> on refuse en strict, et on pénalise fort en relaxed/fallback
- */
 function applyChauffeurAntiRoutierPure(fullText: string, phase: Phase, ctxHits: number, strongHits: number, synHits: number) {
   const looksRoutier =
     includesWord(fullText, "routier") ||
@@ -631,7 +590,7 @@ function applyChauffeurAntiRoutierPure(fullText: string, phase: Phase, ctxHits: 
   if (!hasAgriSignal) {
     if (phase === "strict") return { reject: true, penalty: 999 };
     if (phase === "relaxed") return { reject: false, penalty: 28 };
-    return { reject: false, penalty: 18 }; // fallback
+    return { reject: false, penalty: 18 };
   }
 
   return { reject: false, penalty: 0 };
@@ -647,11 +606,9 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 
   const fullText = cleanText(`${title} ${companyName}`);
 
-  // Exclusions globales
   const globalBan = isGloballyBanned(fullText);
   if (globalBan) return null;
 
-  // Exclusions métier
   for (const p of config.banned_phrases.map(cleanText).filter(Boolean)) {
     if (includesPhrase(fullText, p)) return null;
   }
@@ -659,16 +616,12 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     if (includesPhrase(fullText, b) || includesWord(fullText, b)) return null;
   }
 
-  // Distance
   let dist: number | null = null;
   if (lat !== null && lon !== null) dist = haversineKm(userLat, userLon, lat, lon);
 
   let score = 0;
-
-  // Raisons internes (debug)
   const reasonsInternal: string[] = [];
 
-  // ROME match (interne uniquement)
   const hasRome = Array.isArray(raw?.romes)
     ? raw.romes.some((r: any) => config.romes.includes(r?.code))
     : false;
@@ -686,13 +639,11 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   if (synHits > 0) score += Math.min(22, synHits * 8);
   if (weakHits > 0) score += Math.min(12, weakHits * 3);
 
-  // Pénalité ROME seul (interne)
   if (hasRome && strongHits === 0 && synHits === 0) {
     score -= 10;
     reasonsInternal.push("rome_only");
   }
 
-  // ✅ GARDE-FOU CONTEXTE (par phase)
   const ctx = config.context_keywords ?? [];
   const ctxHits = ctx.length > 0 ? countHits(fullText, ctx) : 0;
 
@@ -707,7 +658,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     }
   }
 
-  // ✅ Chauffeur Agricole : anti-routier pur
   if (config.key === "chauffeur") {
     const ar = applyChauffeurAntiRoutierPure(fullText, phase, ctxHits, strongHits, synHits);
     if (ar.reject) return null;
@@ -717,7 +667,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     }
   }
 
-  // Bonus proximité + pénalité distance
   if (dist !== null) {
     if (dist <= 10) score += 8;
     else if (dist <= 25) score += 5;
@@ -743,8 +692,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     reasonsInternal.push("no_geo");
   }
 
-  // ✅ STRICT : si contexte absent + aucun signal fort => on jette (anti hors-sujet en haut)
-  // NB: on ne considère PAS hasRome comme "signal fort" (sinon on retombe dans le problème ROME seul)
   if (phase === "strict" && (config.context_keywords?.length ?? 0) > 0) {
     const hasStrongSignal = strongHits > 0 || synHits > 0;
     if (ctxHits === 0 && !hasStrongSignal) return null;
@@ -849,12 +796,6 @@ function mergeKeepBest(base: ScoredFormation[], extra: ScoredFormation[]) {
   return Array.from(map.values()).sort(sortByScoreThenDistance);
 }
 
-/**
- * ✅ Nouveau picker :
- * - garde un seuil par phase (minScore)
- * - + seuil ABSOLU anti-honte (ABSOLUTE_MIN_SCORE)
- * - si rien passe => on rend [] (pas de remplissage honteux)
- */
 function pickByThreshold(scored: ScoredFormation[], minScore: number, cap: number) {
   const threshold = Math.max(minScore, ABSOLUTE_MIN_SCORE);
   const kept = scored.filter((s) => s.score >= threshold).sort(sortByScoreThenDistance);
@@ -871,7 +812,7 @@ async function getStrictAndPoolRaw(
   userLon: number
 ): Promise<{
   strictKept: ScoredFormation[];
-  bestRawPool: any[]; // pool "raw" (LBA) du rayon le plus riche
+  bestRawPool: any[];
   appliedRadius: number;
   expanded: boolean;
   debug: {
@@ -908,7 +849,6 @@ async function getStrictAndPoolRaw(
     raw_count_last = fetched.raw_count;
     last_status = fetched.status;
 
-    // On conserve le rayon qui ramène le plus de données "raw"
     if (raw_count_last > bestRawCount) {
       bestRawCount = raw_count_last;
       bestRawPool = raw;
@@ -968,8 +908,8 @@ function detectJobKey(inputMetier: any): string {
   if (METIER_KEY_ALIASES[raw]) return METIER_KEY_ALIASES[raw];
   if (METIER_KEY_ALIASES[cleaned]) return METIER_KEY_ALIASES[cleaned];
 
-  if (JOB_CONFIG[raw]) return raw;
-  if (JOB_CONFIG[cleaned]) return cleaned;
+  if ((JOB_CONFIG as any)[raw]) return raw;
+  if ((JOB_CONFIG as any)[cleaned]) return cleaned;
 
   if (cleaned.includes("responsable") && cleaned.includes("silo")) return "responsable_silo";
   if (cleaned.includes("silo")) return "silo";
@@ -1083,7 +1023,6 @@ Deno.serve(async (req: Request) => {
     const jobKey = detectJobKey(metier);
     const config = JOB_CONFIG[jobKey] || JOB_CONFIG.default;
 
-    // GEO robuste
     const geo = await geocodeCityOrThrow(ville);
     const userLat = geo.userLat;
     const userLon = geo.userLon;
@@ -1092,13 +1031,11 @@ Deno.serve(async (req: Request) => {
     const target = Math.max(6, config.target_min_results);
     const cap = config.max_results ?? 60;
 
-    // 1) STRICT adaptatif + pool raw (pour rescoring relaxed)
     const { strictKept, bestRawPool, appliedRadius, expanded, debug } = await getStrictAndPoolRaw(config, userLat, userLon);
 
     let mode: Mode = "strict";
     let merged: ScoredFormation[] = strictKept;
 
-    // 2) RELAXED (RESCORE RÉEL sur raw pool)
     if (merged.length < target) {
       const relaxedScored = bestRawPool
         .map((r: any) => scoreFormation(r, config, userLat, userLon, "relaxed"))
@@ -1111,7 +1048,6 @@ Deno.serve(async (req: Request) => {
       mode = merged.length > 0 ? "strict+relaxed" : "relaxed";
     }
 
-    // 3) FALLBACK ROME (RESCORE fallback)
     if (merged.length < target) {
       const fallbackRomes = Array.from(new Set([...(config.fallback_romes ?? []), ...config.romes])).filter(Boolean);
 
@@ -1136,11 +1072,9 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Dédup final + cap
     merged = dedupSmart(merged, 3).sort(sortByScoreThenDistance);
     if (merged.length > cap) merged = merged.slice(0, cap);
 
-    // 4) Map -> frontend
     const niveauFiltre = normalizeNiveauFilter(niveau);
 
     const mapped = merged.map((s) => {
@@ -1162,39 +1096,65 @@ Deno.serve(async (req: Request) => {
         site_web: s.url,
         url: s.url,
         niveau: computedNiveau,
-
-        // ✅ Pourquoi ? : raisons humaines, positives, jamais "ROME"
         match: { score: s.score, reasons: s.reasons },
       };
     });
 
-    // 5) PERPLEXITY ENRICHMENT (fallback invisible si nécessaire)
+    // ==================================================================================
+    // 5) PERPLEXITY ENRICHMENT (fallback invisible si nécessaire) - SAFE
+    // ==================================================================================
+
     let perplexityUsed = false;
     let allFormations = mapped;
 
     if (shouldEnrichWithPerplexity(mapped, { min_results: 10, max_distance: 150 })) {
       try {
+        const missing = Math.max(0, 10 - mapped.length);
+
         const perplexityInput: PerplexityFormationInput = {
           metierLabel: config.label,
           villeRef,
           lat: userLat,
           lon: userLon,
-          limit: Math.max(3, 10 - mapped.length),
+          limit: Math.max(3, Math.min(8, missing || 5)),
         };
 
-        const perplexityFormations = await fetchPerplexityFormations(perplexityInput);
+        const pplxRaw = await fetchPerplexityFormations(perplexityInput);
 
-        if (perplexityFormations.length > 0) {
+        // ✅ Filtrage dur : pas de non-géo, pas d'énorme lointain
+        const hardCap = getPerplexityHardCap(config);
+        const pplxFiltered = pplxRaw
+          .filter((f: any) => typeof f?.distance_km === "number" && f.distance_km < 900)
+          .filter((f: any) => f.distance_km <= hardCap);
+
+        // ✅ Normalisation "zéro erreur": alternance/modalite pas inventés
+        const pplxSafe = pplxFiltered.map((f: any) => ({
+          ...f,
+          alternance: "Non renseigné",
+          modalite: (f?.modalite ?? "").toString().trim() || "Non renseigné",
+          rncp: (f?.rncp ?? "").toString().trim() || "Non renseigné",
+          match: {
+            score: PERPLEXITY_SCORE,
+            reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length
+              ? f.match.reasons.slice(0, MAX_WHY_REASONS)
+              : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
+          },
+        }));
+
+        if (pplxSafe.length > 0) {
           perplexityUsed = true;
-          allFormations = mergeFormationsWithoutDuplicates(mapped, perplexityFormations);
-          console.log(`Perplexity: ${perplexityFormations.length} formations ajoutées (total: ${allFormations.length})`);
+          allFormations = mergeFormationsWithoutDuplicates(mapped, pplxSafe);
+          console.log(`Perplexity: ${pplxSafe.length} formations ajoutées (total: ${allFormations.length})`);
         }
       } catch (error) {
         console.error("Perplexity enrichment failed:", error);
       }
     }
 
+    // ==================================================================================
     // 6) Filtre niveau + compteurs
+    // ==================================================================================
+
     const count_total_avant_filtre = allFormations.length;
 
     let results = allFormations;
@@ -1220,11 +1180,6 @@ Deno.serve(async (req: Request) => {
       return Math.max(m, d);
     }, 0);
 
-    /**
-     * ✅ Anti-honte final :
-     * Si malgré tout on n'a rien (ou que le filtre niveau a tout viré),
-     * on renvoie 0 plutôt que des trucs absurdes.
-     */
     const noRelevantResults = results.length === 0;
 
     return new Response(
@@ -1243,8 +1198,6 @@ Deno.serve(async (req: Request) => {
           far_results: maxDist > soft,
           geocode_score: geo.geoScore,
           geocode_type: geo.geoTypeTried,
-
-          // ✅ nouveau : pas de résultat suffisamment cohérent (anti-honte)
           no_relevant_results: noRelevantResults,
           absolute_min_score: ABSOLUTE_MIN_SCORE,
         },
@@ -1256,6 +1209,8 @@ Deno.serve(async (req: Request) => {
           merged_count_before_level_filter: count_total_avant_filtre,
           final_count_after_level_filter: results.length,
           perplexity_enrichment_used: perplexityUsed,
+          perplexity_score: PERPLEXITY_SCORE,
+          perplexity_hard_cap_km: getPerplexityHardCap(config),
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
