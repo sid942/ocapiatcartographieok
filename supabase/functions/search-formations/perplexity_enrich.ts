@@ -503,7 +503,8 @@ IMPORTANT :
     const niveau = inferNiveauFromHint(raw.diploma_hint);
 
     enriched.push({
-      id: `pplx_${crypto.randomUUID()}`,
+      id: `pplx_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2)}`
+}`,
       intitule: raw.title,
       organisme: raw.organisme,
       ville: raw.ville,
