@@ -11,7 +11,7 @@ export const METIERS = [
   { key: "responsable_logistique", label: "Responsable logistique" },
   { key: "magasinier_cariste", label: "Magasinier / cariste" },
 
-  // Dans le backend refait : la clé "maintenance" a le label "Responsable services techniques"
+  // backend: clé "maintenance" => label "Responsable services techniques"
   { key: "maintenance", label: "Responsable services techniques" },
 
   { key: "controleur_qualite", label: "Contrôleur qualité" },
@@ -24,7 +24,7 @@ export const METIERS = [
 export type MetierKey = typeof METIERS[number]["key"];
 export type MetierLabel = typeof METIERS[number]["label"];
 
-// Compat éventuelle si des composants manipulent encore un label
+// Compat éventuelle (si certains composants manipulent encore un label)
 export type Metier = MetierLabel;
 
 // ===============================
@@ -40,12 +40,13 @@ export interface FormationMatch {
 }
 
 export interface Formation {
-  // Back renvoie un id stable (uuid / id LBA)
   id?: string;
 
   intitule: string;
   organisme: string;
-  ville: string | null;
+
+  // ✅ IMPORTANT : le backend renvoie toujours une ville (s.city ?? villeRef)
+  ville: string;
 
   // Coordonnées (optionnelles si non géolocalisé)
   lat?: number;
@@ -57,8 +58,8 @@ export interface Formation {
    */
   distance_km: number;
 
-  // Niveau normalisé
-  niveau: Niveau | string;
+  // ✅ Niveau normalisé (le backend renvoie "3|4|5|6|N/A")
+  niveau: Niveau;
 
   // Liens
   url?: string | null;       // lien LBA éventuel
@@ -67,14 +68,14 @@ export interface Formation {
   // Affichage
   tags?: string[];
 
-  // Enrichissements (optionnels, car LBA ne les fournit pas toujours)
-  rncp?: string;             // "Non renseigné" par défaut côté backend
-  modalite?: string;         // "Non renseigné" par défaut
-  alternance?: "Oui" | "Non" | string; // "Non" par défaut
-  categorie?: string;        // "Diplôme / Titre" par défaut
+  // Enrichissements (optionnels)
+  rncp?: string;
+  modalite?: string;
+  alternance?: "Oui" | "Non" | string;
+  categorie?: string;
   region?: string;
 
-  // Futur "?" explicatif (scoring)
+  // Scoring (futur "?" ou debug)
   match?: FormationMatch;
 }
 
@@ -82,13 +83,30 @@ export interface Formation {
 // RÉPONSE API (Edge Function)
 // ===============================
 
+export type SearchMode = "strict" | "relaxed";
+
+export interface SearchDebugInfo {
+  jobKey?: string;
+  raw_count_last?: number;
+  scored_count_last?: number;
+  kept_count_strict_last?: number;
+  candidates_last_radius?: number;
+}
+
 export interface SearchFormationsResponse {
   metier_detecte: string;
   ville_reference: string;
   rayon_applique: string;
+
+  // ✅ présent dans ton nouveau backend
+  mode?: SearchMode;
+
   count: number;
-  formations: Formation[];
   niveau_filtre?: NiveauFiltre;
+  formations: Formation[];
+
+  // ✅ présent dans ton nouveau backend (tu peux l’ignorer côté UI)
+  debug?: SearchDebugInfo;
 }
 
 // Ancien nom (compat si ton code importe encore PerplexityResponse)
