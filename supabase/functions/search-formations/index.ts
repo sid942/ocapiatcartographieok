@@ -76,27 +76,55 @@ const JOB_CONFIG: Record<string, JobProfile> = {
 // 1. OUTILS DE PRÉCISION (MATHS & LOGIQUE)
 // ==================================================================================
 
-function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; 
+// Calcul de distance en km (FLOAT pour précision)
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return Math.round(R * c);
+  return R * c; // RETOURNE FLOAT, pas arrondi
 }
 
-// Fonction de nettoyage de texte pour comparaison
-function cleanText(text: string): string {
-  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+// Fonction de nettoyage de texte pour comparaison (enlève accents, ponctuation, normalise espaces)
+function cleanText(text: string | null | undefined): string {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Enlève accents
+    .replace(/['']/g, " ") // Remplace apostrophes par espace
+    .replace(/[^a-z0-9\s]/g, "") // Enlève ponctuation
+    .replace(/\s+/g, " ") // Réduit multi-espaces
+    .trim();
+}
+
+// Nettoyage d'un tableau de keywords
+function cleanKeywords(keywords: string[]): string[] {
+  return keywords.map(kw => cleanText(kw));
+}
+
+// Vérification si un mot entier est présent (évite "pl" qui match "diplome")
+function includesWord(text: string, word: string): boolean {
+  const regex = new RegExp(`\\b${word}\\b`, 'i');
+  return regex.test(text);
+}
+
+// Normalisation du niveau
+function normalizeNiveau(niveau: string | null | undefined): '3' | '4' | '5' | '6' | 'all' {
+  if (!niveau) return 'all';
+  const n = niveau.toString().trim();
+  if (n === '3' || n === '4' || n === '5' || n === '6') return n as '3' | '4' | '5' | '6';
+  return 'all';
 }
 
 // LE JUGE IMPITOYABLE : Est-ce que cette formation est valide ?
-function isFormationValid(formation: any, config: JobProfile, userLat: number, userLon: number): boolean {
-  
+function isFormationValid(formation: any, config: JobProfile, userLat: number, userLon: number, cleanedBanned: string[], cleanedRequired: string[]): boolean {
+
   // 1. Check Géographique (Le plus rapide à vérifier)
   // Si LBA renvoie un truc à 80km et qu'on veut 70km, c'est NON.
-  const dist = haversineDistance(userLat, userLon, formation.place.latitude, formation.place.longitude);
+  const dist = haversineKm(userLat, userLon, formation.place.latitude, formation.place.longitude);
   if (dist > config.radius) return false;
 
   // Préparation du texte à analyser (Titre + Nom Organisme)
@@ -104,17 +132,21 @@ function isFormationValid(formation: any, config: JobProfile, userLat: number, u
 
   // 2. Check des BANIS (Sécurité anti-pollution)
   // Ex: Si on cherche "Maintenance" et qu'on trouve "Bâtiment", on tue.
-  for (const banned of config.keywords_banned) {
-    if (fullText.includes(banned)) return false; 
+  for (const banned of cleanedBanned) {
+    // Double vérification : mot entier OU inclusion simple
+    if (includesWord(fullText, banned) || fullText.includes(banned)) {
+      return false;
+    }
   }
 
   // 3. Check de COHÉRENCE (Requis)
   // Si la liste est vide, on accepte tout (cas fallback), sinon il faut matcher.
-  if (config.keywords_required.length > 0) {
-    const hasKeyword = config.keywords_required.some(kw => fullText.includes(kw));
+  if (cleanedRequired.length > 0) {
+    // Au moins un keyword via mot entier OU inclusion
+    const hasKeyword = cleanedRequired.some(kw => includesWord(fullText, kw) || fullText.includes(kw));
     // Si pas de mot clé, on vérifie si le code ROME match (si dispo dans la réponse LBA)
     const hasRome = formation.romes ? formation.romes.some((r: any) => config.romes.includes(r.code)) : false;
-    
+
     if (!hasKeyword && !hasRome) return false;
   }
 
@@ -127,7 +159,7 @@ function isFormationValid(formation: any, config: JobProfile, userLat: number, u
 
 async function fetchLBA(config: JobProfile, lat: number, lon: number) {
   // On demande un rayon un peu plus large à l'API pour être sûr, puis on filtre nous-même strictement
-  const searchRadius = config.radius + 20; 
+  const searchRadius = config.radius + 20;
   const romes = config.romes.join(",");
   const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romes}&latitude=${lat}&longitude=${lon}&radius=${searchRadius}&caller=ocapiat_app`;
 
@@ -135,22 +167,28 @@ async function fetchLBA(config: JobProfile, lat: number, lon: number) {
     const res = await fetch(url);
     if (!res.ok) return [];
     const data = await res.json();
-    
-    // Mapping immédiat pour normaliser
-    return (data.results || []).map((item: any) => ({
-      id: item.id || Math.random().toString(),
-      title: item.title,
-      company: item.company,
-      place: {
-        city: item.place?.city,
-        latitude: item.place?.latitude || lat, // Fallback pour éviter crash calcul
-        longitude: item.place?.longitude || lon,
-        distance: item.place?.distance // Distance LBA (parfois approximative)
-      },
-      url: item.url,
-      romes: item.romes,
-      diplomaLevel: item.diplomaLevel // On garde le niveau si dispo
-    }));
+
+    // Mapping immédiat pour normaliser - IGNORE les items sans coords valides
+    return (data.results || [])
+      .filter((item: any) => {
+        // CRITIQUE : ignorer les formations sans coordonnées valides
+        const hasValidCoords = typeof item.place?.latitude === 'number' && typeof item.place?.longitude === 'number';
+        return hasValidCoords;
+      })
+      .map((item: any) => ({
+        id: item.id || crypto.randomUUID(), // ID stable
+        title: item.title,
+        company: item.company,
+        place: {
+          city: item.place.city,
+          latitude: item.place.latitude, // PAS de fallback
+          longitude: item.place.longitude, // PAS de fallback
+          distance: item.place.distance
+        },
+        url: item.url,
+        romes: item.romes,
+        diplomaLevel: item.diplomaLevel
+      }));
   } catch (e) {
     console.error("LBA Error:", e);
     return [];
@@ -165,26 +203,33 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
 
   try {
-    const { metier, ville } = await req.json();
-    
+    const { metier, ville, niveau } = await req.json();
+
     // 1. Identification du profil métier (Mapping Intelligent)
     // On cherche la clé qui correspond le mieux à l'input utilisateur
     let jobKey = "default";
     const inputClean = cleanText(metier || "");
-    
+
     if (inputClean.includes("silo") && inputClean.includes("responsable")) jobKey = "responsable_silo";
     else if (inputClean.includes("silo")) jobKey = "silo";
     else if (inputClean.includes("chauffeur") || inputClean.includes("conduite")) jobKey = "chauffeur";
     else if (inputClean.includes("maint")) jobKey = "maintenance";
     else if (inputClean.includes("comm") || inputClean.includes("technico")) jobKey = "technico";
-    
+
     const config = JOB_CONFIG[jobKey] || JOB_CONFIG["default"];
 
-    // 2. Géocodage
-    const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1`);
+    // Pré-nettoyage des keywords pour cohérence avec cleanText
+    const cleanedRequired = cleanKeywords(config.keywords_required);
+    const cleanedBanned = cleanKeywords(config.keywords_banned);
+
+    // Normalisation du niveau
+    const niveauFiltre = normalizeNiveau(niveau);
+
+    // 2. Géocodage PRÉCIS avec type=municipality
+    const geoRep = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ville)}&limit=1&type=municipality`);
     const geoData = await geoRep.json();
     if (!geoData.features?.length) throw new Error("Ville inconnue");
-    
+
     const [userLon, userLat] = geoData.features[0].geometry.coordinates;
     const villeRef = geoData.features[0].properties.label;
 
@@ -192,38 +237,43 @@ Deno.serve(async (req: Request) => {
     const rawFormations = await fetchLBA(config, userLat, userLon);
 
     // 4. LE FILTRAGE INTELLIGENT
-    const validFormations = rawFormations.filter((f: any) => isFormationValid(f, config, userLat, userLon));
+    const validFormations = rawFormations.filter((f: any) => isFormationValid(f, config, userLat, userLon, cleanedBanned, cleanedRequired));
 
     // 5. Formatage pour le frontend (Standardisation)
-    const results = validFormations.map((f: any) => {
-      // Recalcul précis de la distance
-      const trueDist = haversineDistance(userLat, userLon, f.place.latitude, f.place.longitude);
-      
+    let results = validFormations.map((f: any) => {
+      // Recalcul précis de la distance (FLOAT)
+      const trueDist = haversineKm(userLat, userLon, f.place.latitude, f.place.longitude);
+
       return {
         id: f.id,
         intitule: f.title,
         organisme: f.company?.name || "Organisme inconnu",
         ville: f.place.city,
-        
-        // --- AJOUT IMPORTANT : COORDONNÉES POUR LA CARTE ---
+
+        // --- COORDONNÉES POUR LA CARTE ---
         lat: f.place.latitude,
         lon: f.place.longitude,
-        // ----------------------------------------------------
-        
-        distance_km: trueDist,
-        tags: [config.label, trueDist + " km"],
+        // ---------------------------------
+
+        distance_km: Math.round(trueDist * 10) / 10, // Arrondi à 1 décimale pour affichage
+        tags: [config.label, Math.round(trueDist * 10) / 10 + " km"],
         url: f.url,
         niveau: f.diplomaLevel || "N/A"
       };
     });
 
-    // Tri par distance
+    // 6. FILTRE PAR NIVEAU si demandé
+    if (niveauFiltre !== 'all') {
+      results = results.filter((f: any) => f.niveau === niveauFiltre);
+    }
+
+    // 7. Tri par distance
     results.sort((a: any, b: any) => a.distance_km - b.distance_km);
 
     return new Response(JSON.stringify({
       metier_detecte: config.label,
       ville_reference: villeRef,
-      rayon_applique: config.radius + " km",
+      rayon_applique: config.radius + " km", // Rayon STRICT appliqué
       count: results.length,
       formations: results
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
