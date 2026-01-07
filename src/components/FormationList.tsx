@@ -15,6 +15,10 @@ function normalizeNiveau(n: string | undefined | null): "3" | "4" | "5" | "6" | 
   return "N/A";
 }
 
+function round1(n: number) {
+  return Math.round(n * 10) / 10;
+}
+
 function getLevelColor(niveau: string) {
   switch (niveau) {
     case "3":
@@ -31,10 +35,17 @@ function getLevelColor(niveau: string) {
 }
 
 function formationKey(f: Formation, idx: number) {
-  // Priorité à un id stable si dispo
   if (f.id) return f.id;
-  // Sinon hash simple basé sur les champs affichés
-  return `${f.intitule}|${f.organisme}|${f.ville}|${idx}`;
+  return `${f.intitule}|${f.organisme}|${f.ville ?? ""}|${idx}`;
+}
+
+function computeAlternance(f: Formation): "Oui" | "Non" {
+  if (f.alternance === "Oui") return "Oui";
+  if (f.alternance === "Non") return "Non";
+
+  const m = (f.modalite ?? "").toLowerCase();
+  if (m.includes("apprentissage") || m.includes("alternance")) return "Oui";
+  return "Non";
 }
 
 export function FormationList({ formations, onFormationClick }: FormationListProps) {
@@ -48,11 +59,24 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
       return n === niveauFilter;
     });
 
-    // Tri “humain” : d’abord géolocalisées, puis distance, puis niveau
+    // Tri "humain" :
+    // 1) géolocalisées d’abord (distance_km < 900)
+    // 2) distance croissante
+    // 3) si distance ~ égale, meilleur score d’abord (si disponible)
+    // 4) si encore égal, niveau croissant (3->6, puis N/A)
     return [...filtered].sort((a, b) => {
       const da = typeof a.distance_km === "number" ? a.distance_km : 9999;
       const db = typeof b.distance_km === "number" ? b.distance_km : 9999;
+
+      const geoA = da < 900 ? 0 : 1;
+      const geoB = db < 900 ? 0 : 1;
+      if (geoA !== geoB) return geoA - geoB;
+
       if (da !== db) return da - db;
+
+      const sa = typeof a.match?.score === "number" ? a.match.score : -1;
+      const sb = typeof b.match?.score === "number" ? b.match.score : -1;
+      if (sa !== sb) return sb - sa;
 
       const na = normalizeNiveau(a.niveau);
       const nb = normalizeNiveau(b.niveau);
@@ -86,11 +110,16 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
       <div className="space-y-2">
         {sortedFormations.map((formation, index) => {
           const niveauNorm = normalizeNiveau(formation.niveau);
-          const hasDistance = typeof formation.distance_km === "number" && formation.distance_km < 900;
+
+          const hasDistance =
+            typeof formation.distance_km === "number" && formation.distance_km < 900;
 
           const rncp = formation.rncp ?? "Non renseigné";
           const categorie = formation.categorie ?? "Diplôme / Titre";
-          const alternance = formation.alternance ?? "Non";
+          const alternance = computeAlternance(formation);
+
+          const villeLabel = formation.ville ?? "Ville non renseignée";
+          const distLabel = hasDistance ? `${round1(formation.distance_km)} km` : "Non géolocalisé";
 
           return (
             <div
@@ -103,6 +132,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                 <h3 className="font-bold text-gray-900 text-sm flex-1 leading-tight group-hover:text-[#47A152] transition-colors">
                   {formation.intitule}
                 </h3>
+
                 <span
                   className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
                     niveauNorm
@@ -122,16 +152,14 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                 <div className="flex items-start gap-2">
                   <MapPin className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
                   <div className="flex items-center gap-2">
-                    <span>{formation.ville}</span>
-                    {hasDistance ? (
-                      <span className="bg-gray-200 text-gray-700 px-1.5 rounded text-[10px] font-semibold">
-                        {formation.distance_km} km
-                      </span>
-                    ) : (
-                      <span className="bg-gray-100 text-gray-500 px-1.5 rounded text-[10px] font-semibold">
-                        Non géolocalisé
-                      </span>
-                    )}
+                    <span>{villeLabel}</span>
+                    <span
+                      className={`px-1.5 rounded text-[10px] font-semibold ${
+                        hasDistance ? "bg-gray-200 text-gray-700" : "bg-gray-100 text-gray-500"
+                      }`}
+                    >
+                      {distLabel}
+                    </span>
                   </div>
                 </div>
 
@@ -139,7 +167,11 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                   <Award className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
                   <span title="Répertoire National des Certifications Professionnelles">
                     RNCP&nbsp;:{" "}
-                    {rncp !== "Non renseigné" ? <span className="font-mono text-gray-700">{rncp}</span> : "Non renseigné"}
+                    {rncp !== "Non renseigné" ? (
+                      <span className="font-mono text-gray-700">{rncp}</span>
+                    ) : (
+                      "Non renseigné"
+                    )}
                   </span>
                 </div>
 
@@ -175,7 +207,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                   </div>
                 )}
 
-                {/* (Optionnel) futur "?" : si match.reasons existe, tu pourras l’afficher en tooltip */}
+                {/* Futur "?" (match.reasons) déjà prêt */}
                 {/* {formation.match?.reasons?.length ? (...) : null} */}
               </div>
             </div>
