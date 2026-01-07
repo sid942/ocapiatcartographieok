@@ -1,5 +1,13 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, MapPin, Building2, Award, FileText, Briefcase, HelpCircle } from "lucide-react";
+import {
+  ExternalLink,
+  MapPin,
+  Building2,
+  Award,
+  FileText,
+  Briefcase,
+  CircleHelp,
+} from "lucide-react";
 import type { Formation } from "../types";
 
 interface FormationListProps {
@@ -49,47 +57,63 @@ function computeAlternance(f: Formation): "Oui" | "Non" {
 }
 
 /**
- * Objectif: éviter l'effet "honte" :
- * - On affiche un titre principal "générique" (avant ":" / "-" / " (")
- * - La spécialité / mention (après ":" ou le contenu entre parenthèses) => en petit dessous
+ * Objectif :
+ * - Titre principal propre (sans "SPE", "SPECIALITE", etc.)
+ * - Spé en petit dessous
  */
-function splitIntitule(raw: string | undefined | null): { title: string; subtitle?: string } {
-  const s = (raw ?? "").toString().trim();
-  if (!s) return { title: "Formation" };
+function splitTitle(intitule: string): { main: string; sub: string | null } {
+  const t = (intitule ?? "").toString().trim();
+  if (!t) return { main: "Formation", sub: null };
 
-  // Ex: "TECHNIQUES DE COMMERCIALISATION : BUSINESS ..." => title="TECHNIQUES DE COMMERCIALISATION", subtitle="BUSINESS ..."
-  const colonIdx = s.indexOf(":");
-  if (colonIdx > 6) {
-    const left = s.slice(0, colonIdx).trim();
-    const right = s.slice(colonIdx + 1).trim();
-    if (left && right) return { title: left, subtitle: right };
+  // 1) Si ":" => souvent domaine : spécialisation
+  const colonIdx = t.indexOf(" : ");
+  if (colonIdx > 4 && colonIdx < t.length - 4) {
+    return {
+      main: t.slice(0, colonIdx).trim(),
+      sub: t.slice(colonIdx + 3).trim() || null,
+    };
   }
 
-  // Ex: "XYZ (BTSA)" => title="XYZ", subtitle="BTSA"
-  const mParen = s.match(/^(.*)\(([^)]+)\)\s*$/);
-  if (mParen?.[1]?.trim() && mParen?.[2]?.trim()) {
-    const t = mParen[1].trim();
-    const sub = mParen[2].trim();
-    return { title: t, subtitle: sub };
+  // 2) Si parenthèses + reste après => on met tout ce qui est "entre()" + le reste en sub
+  const openIdx = t.indexOf("(");
+  const closeIdx = t.indexOf(")");
+  if (openIdx >= 0 && closeIdx > openIdx) {
+    const before = t.slice(0, openIdx).trim();
+    const inside = t.slice(openIdx + 1, closeIdx).trim();
+    const after = t.slice(closeIdx + 1).trim();
+
+    const subParts = [inside, after].filter(Boolean);
+    const sub = subParts.length ? subParts.join(" — ") : null;
+
+    // Si le titre avant parenthèse est trop court, on garde tout en main
+    if (before && before.length >= 6) return { main: before, sub };
   }
 
-  // Ex: "XYZ - option ..." => title="XYZ", subtitle="option ..."
-  const dashIdx = s.indexOf(" - ");
-  if (dashIdx > 6) {
-    const left = s.slice(0, dashIdx).trim();
-    const right = s.slice(dashIdx + 3).trim();
-    if (left && right) return { title: left, subtitle: right };
+  // 3) Si " SPE " / "SPECIALITE" / "OPTION" / "PARCOURS"
+  const patterns = [" SPE ", " SPECIALITE ", " SPÉCIALITÉ ", " OPTION ", " PARCOURS "];
+  const upper = t.toUpperCase();
+  for (const p of patterns) {
+    const idx = upper.indexOf(p);
+    if (idx > 6 && idx < t.length - 6) {
+      return {
+        main: t.slice(0, idx).trim(),
+        sub: t.slice(idx).trim() || null,
+      };
+    }
   }
 
-  return { title: s };
+  return { main: t, sub: null };
 }
 
-function formatReasons(reasons: any): string[] {
-  if (!Array.isArray(reasons)) return [];
-  return reasons
-    .map((r) => (r ?? "").toString().trim())
-    .filter(Boolean)
-    .slice(0, 6);
+function getWhyReasons(f: Formation): string[] {
+  const reasons = (f.match?.reasons ?? [])
+    .map((x) => (x ?? "").toString().trim())
+    .filter(Boolean);
+
+  if (reasons.length) return reasons.slice(0, 3);
+
+  // fallback propre si rien
+  return ["Résultat pertinent selon votre recherche"];
 }
 
 export function FormationList({ formations, onFormationClick }: FormationListProps) {
@@ -104,11 +128,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
       return n === niveauFilter;
     });
 
-    // Tri "humain" :
-    // 1) géolocalisées d’abord (distance_km < 900)
-    // 2) distance croissante
-    // 3) si distance ~ égale, meilleur score d’abord (si disponible)
-    // 4) si encore égal, niveau croissant (3->6, puis N/A)
+    // Tri "humain"
     return [...filtered].sort((a, b) => {
       const da = typeof a.distance_km === "number" ? a.distance_km : 9999;
       const db = typeof b.distance_km === "number" ? b.distance_km : 9999;
@@ -166,84 +186,62 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
           const villeLabel = formation.ville ?? "Ville non renseignée";
           const distLabel = hasDistance ? `${round1(formation.distance_km)} km` : "Non géolocalisé";
 
-          const { title, subtitle } = splitIntitule(formation.intitule);
-          const reasons = formatReasons(formation.match?.reasons);
-          const score = typeof formation.match?.score === "number" ? formation.match.score : null;
-
+          const { main, sub } = splitTitle(formation.intitule);
           const whyOpen = openWhyKey === key;
+          const whyReasons = getWhyReasons(formation);
 
           return (
             <div
               key={key}
               onClick={() => onFormationClick?.(formation)}
-              className="bg-gray-50 rounded-lg border border-gray-200 p-3 hover:bg-white hover:shadow-lg hover:border-[#47A152] transition-all cursor-pointer group relative"
+              className="bg-gray-50 rounded-lg border border-gray-200 p-3 hover:bg-white hover:shadow-lg hover:border-[#47A152] transition-all cursor-pointer group"
             >
               {/* Header */}
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-gray-900 text-sm leading-tight group-hover:text-[#47A152] transition-colors">
-                    {title}
-                  </h3>
+                  <div className="flex items-start gap-2">
+                    <h3 className="font-bold text-gray-900 text-sm leading-tight group-hover:text-[#47A152] transition-colors">
+                      {main}
+                    </h3>
 
-                  {/* Spé en TOUT petit dessous */}
-                  {subtitle ? (
-                    <div className="mt-0.5 text-[11px] text-gray-500 leading-snug line-clamp-2">
-                      {subtitle}
-                    </div>
-                  ) : null}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenWhyKey((prev) => (prev === key ? null : key));
+                      }}
+                      className="mt-0.5 inline-flex items-center justify-center rounded hover:bg-gray-200/60 p-1"
+                      title="Pourquoi cette formation ?"
+                      aria-label="Pourquoi cette formation ?"
+                    >
+                      <CircleHelp className="h-4 w-4 text-gray-500" />
+                    </button>
+                  </div>
+
+                  {sub ? <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{sub}</div> : null}
                 </div>
 
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {/* "?" pourquoi cette formation */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpenWhyKey((prev) => (prev === key ? null : key));
-                    }}
-                    className="p-1 rounded-md hover:bg-gray-200 text-gray-500 hover:text-gray-700"
-                    aria-label="Pourquoi cette formation ?"
-                    title="Pourquoi cette formation ?"
-                  >
-                    <HelpCircle className="h-4 w-4" />
-                  </button>
-
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
-                      niveauNorm
-                    )}`}
-                  >
-                    {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
-                  </span>
-                </div>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
+                    niveauNorm
+                  )}`}
+                >
+                  {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
+                </span>
               </div>
 
-              {/* Popup "Pourquoi" */}
+              {/* WHY (toggle) */}
               {whyOpen ? (
                 <div
-                  className="mb-2 rounded-lg border border-gray-200 bg-white p-2 text-[11px] text-gray-700 shadow-sm"
                   onClick={(e) => e.stopPropagation()}
+                  className="mb-2 rounded-md border border-gray-200 bg-white p-2"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold">Pourquoi cette formation ?</div>
-                    {score !== null ? (
-                      <div className="text-[10px] font-bold text-gray-600">Score&nbsp;: {score}</div>
-                    ) : null}
-                  </div>
-
-                  {reasons.length ? (
-                    <ul className="mt-1 list-disc pl-4 space-y-0.5">
-                      {reasons.map((r, i) => (
-                        <li key={i}>{r}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="mt-1 text-gray-500 italic">Raisons non disponibles.</div>
-                  )}
-
-                  <div className="mt-1 text-gray-500">
-                    Astuce&nbsp;: si c’est trop loin, la distance est pénalisée et la formation descend dans la liste.
-                  </div>
+                  <div className="text-[11px] font-bold text-gray-800 mb-1">Pourquoi cette formation ?</div>
+                  <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-gray-700">
+                    {whyReasons.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
                 </div>
               ) : null}
 
