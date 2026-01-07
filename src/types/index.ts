@@ -35,7 +35,15 @@ export type Niveau = "3" | "4" | "5" | "6" | "N/A";
 export type NiveauFiltre = "3" | "4" | "5" | "6" | "all";
 
 export interface FormationMatch {
+  /**
+   * Score interne (scoring + distance + contexte)
+   * Utilisé pour le "?" (pourquoi cette formation)
+   */
   score?: number;
+
+  /**
+   * Raisons courtes et humaines (ex: "ROME compatible", "contexte métier OK", "distance élevée")
+   */
   reasons?: string[];
 }
 
@@ -45,7 +53,10 @@ export interface Formation {
   intitule: string;
   organisme: string;
 
-  // ✅ IMPORTANT : le backend renvoie toujours une ville (s.city ?? villeRef)
+  /**
+   * ✅ Le backend renvoie toujours une ville (s.city ?? villeRef)
+   * Donc pas optionnel côté UI.
+   */
   ville: string;
 
   // Coordonnées (optionnelles si non géolocalisé)
@@ -54,7 +65,8 @@ export interface Formation {
 
   /**
    * Toujours présent.
-   * Convention : 999 = non géolocalisé / distance inconnue
+   * Convention backend :
+   * - 999 = non géolocalisé / distance inconnue
    */
   distance_km: number;
 
@@ -65,7 +77,7 @@ export interface Formation {
   url?: string | null;       // lien LBA éventuel
   site_web?: string | null;  // utilisé par ton UI (affiche "Voir le site")
 
-  // Affichage
+  // Affichage (optionnel, futur)
   tags?: string[];
 
   // Enrichissements (optionnels)
@@ -75,7 +87,10 @@ export interface Formation {
   categorie?: string;
   region?: string;
 
-  // Scoring (futur "?" ou debug)
+  /**
+   * Scoring (pour le "?" + debug UI)
+   * En V3 backend, il est renvoyé. On le garde optionnel pour robustesse.
+   */
   match?: FormationMatch;
 }
 
@@ -83,7 +98,6 @@ export interface Formation {
 // RÉPONSE API (Edge Function)
 // ===============================
 
-// ✅ aligné avec le backend V2.5
 export type SearchMode =
   | "strict"
   | "relaxed"
@@ -91,7 +105,24 @@ export type SearchMode =
   | "strict+relaxed"
   | "strict+relaxed+fallback_rome";
 
-// ✅ aligné avec debug du backend V2.5
+export interface SearchWarnings {
+  /**
+   * true si des résultats dépassent le "soft cap" distance du métier
+   * => utile pour afficher une alerte UX (sans faire peur)
+   */
+  far_results?: boolean;
+
+  /**
+   * Qualité du géocodage (API adresse)
+   */
+  geocode_score?: number;
+
+  /**
+   * Type de géocodage choisi (municipality/city/fallback)
+   */
+  geocode_type?: string;
+}
+
 export interface SearchDebugInfo {
   jobKey?: string;
 
@@ -112,19 +143,32 @@ export interface SearchFormationsResponse {
   ville_reference: string;
   rayon_applique: string;
 
-  // ✅ présent dans ton backend
+  /**
+   * V3 backend: présent (mais on le laisse optionnel côté front pour tolérer les versions)
+   */
   mode?: SearchMode;
 
-  // ✅ total trouvé AVANT filtre niveau
+  /**
+   * Total trouvé AVANT filtre niveau (très utile pour UI/UX)
+   */
   count_total?: number;
 
-  // ✅ count affiché (APRÈS filtre niveau)
+  /**
+   * Count affiché (APRÈS filtre niveau)
+   */
   count: number;
 
   niveau_filtre?: NiveauFiltre;
   formations: Formation[];
 
-  // ✅ présent dans ton backend (tu peux l’ignorer côté UI)
+  /**
+   * Infos “anti-honte” (UI peut afficher une petite alerte si far_results=true)
+   */
+  warnings?: SearchWarnings;
+
+  /**
+   * Debug backend (UI peut ignorer)
+   */
   debug?: SearchDebugInfo;
 }
 
