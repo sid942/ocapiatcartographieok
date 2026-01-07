@@ -2,12 +2,13 @@
  * Perplexity Enrichment Module
  *
  * Complète les résultats LBA avec des formations supplémentaires via Perplexity AI
- * uniquement si nécessaire (< 10 résultats ou distance élevée).
+ * uniquement si nécessaire.
  *
  * Règles strictes :
- * - Chaque formation doit avoir 2 URLs de sources différentes et vérifiées (HTTP 200)
+ * - Chaque formation doit avoir 2 URLs de sources différentes et vérifiées
  * - Pas de doublons (intitulé + organisme + ville)
  * - Formations cohérentes avec le métier recherché
+ * - Distance réelle (jamais inventée) : géocodage + haversine
  */
 
 const PPLX_API_URL = "https://api.perplexity.ai/chat/completions";
@@ -26,9 +27,16 @@ export interface PerplexityFormationRaw {
   organisme: string;
   ville: string;
   address?: string;
+
+  // URLs (2 sources différentes)
   url1: string;
   url2: string;
-  diploma_hint?: string;
+
+  // infos optionnelles
+  diploma_hint?: string; // ex: CAP, Bac Pro, BP, BTS, BTSA, BUT, Licence...
+  alternance?: "Oui" | "Non" | "Non renseigné";
+  modalite?: string; // ex: "Apprentissage", "Alternance", "Formation continue", etc.
+  rncp?: string;
 }
 
 export interface EnrichedFormation {
@@ -52,36 +60,52 @@ export interface EnrichedFormation {
   };
 }
 
-/**
- * Vérifie si une URL répond avec un status HTTP 200
- */
-async function isUrlValid(url: string): Promise<boolean> {
+function cleanText(text: string | null | undefined): string {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’']/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractDomain(url: string): string | null {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-
-    const response = await fetch(url, {
-      method: "HEAD",
-      signal: controller.signal,
-      redirect: "follow",
-    });
-
-    clearTimeout(timeoutId);
-    return response.ok; // 200-299
+    const u = new URL(url);
+    return u.hostname.replace(/^www\./i, "").toLowerCase();
   } catch {
-    return false;
+    return null;
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal, redirect: "follow" });
+    return res;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
 /**
- * Extrait le domaine d'une URL
+ * Vérifie si une URL répond (beaucoup de sites bloquent HEAD → fallback GET léger)
  */
-function extractDomain(url: string): string | null {
+async function isUrlValid(url: string): Promise<boolean> {
   try {
-    const urlObj = new URL(url);
-    return urlObj.hostname;
+    // 1) HEAD
+    const head = await fetchWithTimeout(url, { method: "HEAD" }, 5000);
+    if (head.ok) return true;
+
+    // 2) fallback GET (on ne lit pas le body)
+    const get = await fetchWithTimeout(url, { method: "GET" }, 7000);
+    return get.ok;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -89,29 +113,107 @@ function extractDomain(url: string): string | null {
  * Vérifie que 2 URLs sont valides et sur des domaines différents
  */
 async function validateUrls(url1: string, url2: string): Promise<boolean> {
-  // Vérifier que les domaines sont différents
-  const domain1 = extractDomain(url1);
-  const domain2 = extractDomain(url2);
+  const d1 = extractDomain(url1);
+  const d2 = extractDomain(url2);
+  if (!d1 || !d2 || d1 === d2) return false;
 
-  if (!domain1 || !domain2 || domain1 === domain2) {
-    return false;
+  const [ok1, ok2] = await Promise.all([isUrlValid(url1), isUrlValid(url2)]);
+  return ok1 && ok2;
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function round1(n: number) {
+  return Math.round(n * 10) / 10;
+}
+
+/**
+ * Géocodage via api-adresse.data.gouv.fr
+ * - Essaye d'abord l'adresse complète si dispo
+ * - Sinon fallback sur la ville
+ */
+async function geocodeFrance(query: string): Promise<{ lat: number; lon: number; score: number } | null> {
+  const q = query.trim();
+  if (!q || q.length < 3) return null;
+
+  // On essaye "municipality" puis "city" puis fallback (plus permissif)
+  const tries: Array<{ url: string; minScore: number }> = [
+    {
+      url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=housenumber`,
+      minScore: 0.45,
+    },
+    {
+      url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=street`,
+      minScore: 0.45,
+    },
+    {
+      url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=municipality`,
+      minScore: 0.45,
+    },
+    {
+      url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=city`,
+      minScore: 0.45,
+    },
+    {
+      url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`,
+      minScore: 0.55,
+    },
+  ];
+
+  for (const t of tries) {
+    try {
+      const res = await fetchWithTimeout(t.url, { method: "GET" }, 7000);
+      if (!res.ok) continue;
+      const data = await res.json().catch(() => null);
+      const feat = data?.features?.[0];
+      const coords = feat?.geometry?.coordinates;
+      const props = feat?.properties;
+      if (!Array.isArray(coords) || coords.length < 2) continue;
+
+      const [lon, lat] = coords;
+      const score = typeof props?.score === "number" ? props.score : 0;
+      if (score < t.minScore) continue;
+
+      if (typeof lat === "number" && typeof lon === "number") {
+        return { lat, lon, score };
+      }
+    } catch {
+      // continue
+    }
   }
 
-  // Vérifier que les deux URLs répondent
-  const [valid1, valid2] = await Promise.all([
-    isUrlValid(url1),
-    isUrlValid(url2),
-  ]);
+  return null;
+}
 
-  return valid1 && valid2;
+function inferNiveauFromHint(hint: string | undefined): string {
+  const h = cleanText(hint ?? "");
+  if (!h) return "N/A";
+
+  if (h.includes("cap") || h.includes("bep")) return "3";
+  if (h.includes("bac pro") || (h.includes("bac") && !h.includes("bac+"))) return "4";
+  if (h.includes("bp") || h.includes("brevet professionnel")) return "4";
+  if (h.includes("bts") || h.includes("btsa") || h.includes("dut") || h.includes("bac 2") || h.includes("bac+2"))
+    return "5";
+  if (h.includes("but") || h.includes("licence") || h.includes("bachelor") || h.includes("bac 3") || h.includes("bac+3"))
+    return "6";
+
+  return "N/A";
 }
 
 /**
  * Appelle Perplexity AI pour obtenir des formations supplémentaires
  */
-export async function fetchPerplexityFormations(
-  input: PerplexityFormationInput
-): Promise<EnrichedFormation[]> {
+export async function fetchPerplexityFormations(input: PerplexityFormationInput): Promise<EnrichedFormation[]> {
   const { metierLabel, villeRef, lat, lon, limit = 5 } = input;
 
   const apiKey = Deno.env.get("PPLX_API_KEY");
@@ -120,44 +222,46 @@ export async function fetchPerplexityFormations(
     return [];
   }
 
+  // Prompts : on force un JSON strict + infos alternance + 2 sources
   const systemPrompt = `Tu es un expert en formations professionnelles françaises.
-Ta tâche est de trouver des formations réelles et pertinentes pour le métier "${metierLabel}" près de "${villeRef}".
+Tu dois trouver des formations RÉELLES, VÉRIFIABLES et pertinentes pour le métier "${metierLabel}" près de "${villeRef}".
 
-IMPORTANT :
-- Retourne UNIQUEMENT des formations qui correspondent EXACTEMENT au métier "${metierLabel}"
-- Privilégie les formations en alternance/apprentissage
-- Inclus l'adresse complète si disponible
-- Pour chaque formation, fournis 2 URLs de sources DIFFÉRENTES (sites web différents)
-- Ne retourne QUE des formations réelles et vérifiables`;
+RÈGLES ABSOLUES :
+- Retourne UNIQUEMENT des formations cohérentes avec le métier "${metierLabel}" (pas de hors-sujet)
+- Chaque formation DOIT avoir 2 URLs de sources différentes (domaines différents) et fiables
+- Préfère des organismes officiels (CFA, CFPPA, lycées agricoles, EPLEFPA, MFR, GRETA, universités, IUT)
+- Si possible, indique l'adresse complète
+- Tu dois répondre UNIQUEMENT par un JSON valide (aucun texte avant/après)`;
 
-  const userPrompt = `Trouve ${limit} formations pour le métier "${metierLabel}" près de "${villeRef}".
+  const userPrompt = `Trouve ${limit} formations proches de "${villeRef}" pour devenir "${metierLabel}".
 
-Retourne UNIQUEMENT un JSON avec cette structure exacte (pas de texte avant ou après) :
+Répond UNIQUEMENT en JSON avec exactement cette structure :
 {
   "formations": [
     {
       "title": "Nom exact de la formation",
       "organisme": "Nom exact de l'organisme/école",
-      "ville": "Nom de la ville",
-      "address": "Adresse complète si disponible",
-      "url1": "URL source 1 (site officiel de l'organisme)",
-      "url2": "URL source 2 (autre site - carif, onisep, etc)",
-      "diploma_hint": "Niveau du diplôme (CAP, Bac Pro, BTS, etc)"
+      "ville": "Ville (ex: Montpellier)",
+      "address": "Adresse complète si disponible (optionnel)",
+      "url1": "Source 1 (site officiel ou page organisme)",
+      "url2": "Source 2 (autre site fiable: Onisep, Carif-Oref, France Travail, site public, etc.)",
+      "diploma_hint": "Ex: CAP, Bac Pro, BP, BTS, BTSA, BUT, Licence (optionnel)",
+      "alternance": "Oui|Non|Non renseigné (optionnel)",
+      "modalite": "Texte court: apprentissage / alternance / initial / continue (optionnel)",
+      "rncp": "Code RNCP si trouvé (optionnel)"
     }
   ]
 }
 
-CRITÈRES STRICTS :
-- Formations cohérentes avec "${metierLabel}"
-- Organismes réels (CFA, lycées professionnels, écoles)
-- Ville proche de "${villeRef}" (France)
-- 2 URLs différentes et vérifiables pour chaque formation`;
+IMPORTANT :
+- 2 URLs doivent être sur des DOMAINES DIFFÉRENTS
+- Les formations doivent être cohérentes avec "${metierLabel}"`;
 
   try {
     const response = await fetch(PPLX_API_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -167,7 +271,7 @@ CRITÈRES STRICTS :
           { role: "user", content: userPrompt },
         ],
         temperature: 0.2,
-        max_tokens: 2000,
+        max_tokens: 2200,
       }),
     });
 
@@ -176,7 +280,7 @@ CRITÈRES STRICTS :
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json().catch(() => null);
     const content = data?.choices?.[0]?.message?.content;
 
     if (!content) {
@@ -184,7 +288,7 @@ CRITÈRES STRICTS :
       return [];
     }
 
-    // Parser le JSON (peut être entouré de ```json ... ```)
+    // Parser JSON (gérer ```json)
     let jsonContent = content.trim();
     if (jsonContent.startsWith("```json")) {
       jsonContent = jsonContent.replace(/^```json\s*/i, "").replace(/```\s*$/, "");
@@ -200,58 +304,65 @@ CRITÈRES STRICTS :
       return [];
     }
 
-    // Valider et enrichir chaque formation
     const enriched: EnrichedFormation[] = [];
 
     for (const raw of rawFormations) {
-      // Validation des champs requis
+      // champs requis
       if (!raw.title || !raw.organisme || !raw.ville || !raw.url1 || !raw.url2) {
-        console.warn("Formation manque champs requis:", raw);
         continue;
       }
 
-      // Validation des URLs
+      // URLs validées + domaines différents
       const urlsValid = await validateUrls(raw.url1, raw.url2);
-      if (!urlsValid) {
-        console.warn("URLs invalides pour formation:", raw.title);
-        continue;
+      if (!urlsValid) continue;
+
+      // Géocodage : d'abord adresse, sinon (organisme + ville), sinon ville
+      const q1 = raw.address ? `${raw.address} ${raw.ville}` : "";
+      const q2 = `${raw.organisme} ${raw.ville}`;
+      const q3 = raw.ville;
+
+      const geo =
+        (q1 ? await geocodeFrance(q1) : null) ||
+        (q2 ? await geocodeFrance(q2) : null) ||
+        (q3 ? await geocodeFrance(q3) : null);
+
+      let formationLat: number | undefined;
+      let formationLon: number | undefined;
+      let distance_km = 999;
+
+      if (geo?.lat != null && geo?.lon != null) {
+        formationLat = geo.lat;
+        formationLon = geo.lon;
+        distance_km = round1(haversineKm(lat, lon, formationLat, formationLon));
       }
 
-      // Géocodage de la ville (simple approximation avec la ville de référence)
-      // Note: dans un cas réel, on pourrait faire un appel à l'API géo
-      const formationLat = lat;
-      const formationLon = lon;
-      const distance_km = 50; // Approximation - dans un cas réel, calculer la vraie distance
+      const niveau = inferNiveauFromHint(raw.diploma_hint);
 
-      // Inférer le niveau
-      let niveau = "N/A";
-      const diplomaHint = (raw.diploma_hint || "").toLowerCase();
-      if (diplomaHint.includes("cap") || diplomaHint.includes("bep")) niveau = "3";
-      else if (diplomaHint.includes("bac") && !diplomaHint.includes("bac+")) niveau = "4";
-      else if (diplomaHint.includes("bts") || diplomaHint.includes("dut") || diplomaHint.includes("bac+2")) niveau = "5";
-      else if (diplomaHint.includes("licence") || diplomaHint.includes("bachelor") || diplomaHint.includes("bac+3")) niveau = "6";
+      const alternance = raw.alternance === "Oui" || raw.alternance === "Non" ? raw.alternance : "Non renseigné";
+      const modalite = (raw.modalite ?? "").toString().trim() || "Non renseigné";
+      const rncp = (raw.rncp ?? "").toString().trim() || "Non renseigné";
 
       enriched.push({
         id: `pplx_${crypto.randomUUID()}`,
         intitule: raw.title,
         organisme: raw.organisme,
         ville: raw.ville,
-        lat: formationLat,
-        lon: formationLon,
+        ...(formationLat != null && formationLon != null ? { lat: formationLat, lon: formationLon } : {}),
         distance_km,
-        rncp: "Non renseigné",
-        modalite: "Alternance possible",
-        alternance: "Oui",
+        rncp,
+        modalite,
+        alternance,
         categorie: "Diplôme / Titre",
         site_web: raw.url1,
         url: raw.url1,
         niveau,
         match: {
-          score: 25, // Score modéré pour Perplexity
+          score: 25, // Score modéré pour rester derrière LBA si LBA est bon
           reasons: [
-            "Formation complémentaire suggérée",
-            "Correspond au métier recherché",
-          ],
+            "Formation trouvée sur des sources vérifiées",
+            "Correspond à votre métier recherché",
+            distance_km !== 999 ? "Proche de votre ville" : "Localisation non confirmée",
+          ].slice(0, 3),
         },
       });
     }
@@ -274,30 +385,23 @@ export function shouldEnrichWithPerplexity(
   const minResults = config.min_results ?? 10;
   const maxDistance = config.max_distance ?? 150;
 
-  // Cas 1: Pas assez de résultats
-  if (currentResults.length < minResults) {
-    return true;
-  }
+  if (currentResults.length < minResults) return true;
 
-  // Cas 2: Résultats trop éloignés
-  const avgDistance = currentResults.reduce((sum, r) => {
-    const dist = typeof r?.distance_km === "number" ? r.distance_km : 999;
-    return sum + dist;
-  }, 0) / currentResults.length;
+  const avgDistance =
+    currentResults.reduce((sum, r) => {
+      const dist = typeof r?.distance_km === "number" ? r.distance_km : 999;
+      return sum + dist;
+    }, 0) / currentResults.length;
 
-  if (avgDistance > maxDistance) {
-    return true;
-  }
-
-  return false;
+  return avgDistance > maxDistance;
 }
 
 /**
- * Crée une clé de déduplication
+ * Clé de déduplication
  */
 export function makeDedupKey(intitule: string, organisme: string, ville: string): string {
   const clean = (s: string) =>
-    s
+    (s ?? "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -308,38 +412,25 @@ export function makeDedupKey(intitule: string, organisme: string, ville: string)
 }
 
 /**
- * Fusionne les formations LBA et Perplexity sans doublons
+ * Fusion sans doublons (LBA d'abord)
  */
-export function mergeFormationsWithoutDuplicates(
-  lbaFormations: any[],
-  perplexityFormations: EnrichedFormation[]
-): any[] {
+export function mergeFormationsWithoutDuplicates(lbaFormations: any[], perplexityFormations: EnrichedFormation[]): any[] {
   const seen = new Set<string>();
   const merged: any[] = [];
 
-  // Ajouter d'abord les formations LBA
-  for (const formation of lbaFormations) {
-    const key = makeDedupKey(
-      formation.intitule || "",
-      formation.organisme || "",
-      formation.ville || ""
-    );
+  for (const f of lbaFormations) {
+    const key = makeDedupKey(f?.intitule || "", f?.organisme || "", f?.ville || "");
     if (!seen.has(key)) {
       seen.add(key);
-      merged.push(formation);
+      merged.push(f);
     }
   }
 
-  // Ajouter les formations Perplexity (sans doublons)
-  for (const formation of perplexityFormations) {
-    const key = makeDedupKey(
-      formation.intitule || "",
-      formation.organisme || "",
-      formation.ville || ""
-    );
+  for (const f of perplexityFormations) {
+    const key = makeDedupKey(f?.intitule || "", f?.organisme || "", f?.ville || "");
     if (!seen.has(key)) {
       seen.add(key);
-      merged.push(formation);
+      merged.push(f);
     }
   }
 
