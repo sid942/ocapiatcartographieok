@@ -1,7 +1,15 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
-import { Building2, MapPin, Award, FileText, Briefcase, ExternalLink, HelpCircle } from "lucide-react";
+import {
+  Building2,
+  MapPin,
+  Award,
+  FileText,
+  Briefcase,
+  ExternalLink,
+  CircleHelp,
+} from "lucide-react";
 import type { Formation } from "../types";
 import "leaflet/dist/leaflet.css";
 
@@ -23,40 +31,6 @@ function normalizeNiveau(n: string | undefined | null): "3" | "4" | "5" | "6" | 
 function formationKey(f: Formation, idx: number) {
   if (f.id) return f.id;
   return `${f.intitule}|${f.organisme}|${f.ville ?? ""}|${idx}`;
-}
-
-function splitIntitule(raw: string | undefined | null): { title: string; subtitle?: string } {
-  const s = (raw ?? "").toString().trim();
-  if (!s) return { title: "Formation" };
-
-  const colonIdx = s.indexOf(":");
-  if (colonIdx > 6) {
-    const left = s.slice(0, colonIdx).trim();
-    const right = s.slice(colonIdx + 1).trim();
-    if (left && right) return { title: left, subtitle: right };
-  }
-
-  const mParen = s.match(/^(.*)\(([^)]+)\)\s*$/);
-  if (mParen?.[1]?.trim() && mParen?.[2]?.trim()) {
-    return { title: mParen[1].trim(), subtitle: mParen[2].trim() };
-  }
-
-  const dashIdx = s.indexOf(" - ");
-  if (dashIdx > 6) {
-    const left = s.slice(0, dashIdx).trim();
-    const right = s.slice(dashIdx + 3).trim();
-    if (left && right) return { title: left, subtitle: right };
-  }
-
-  return { title: s };
-}
-
-function formatReasons(reasons: any): string[] {
-  if (!Array.isArray(reasons)) return [];
-  return reasons
-    .map((r) => (r ?? "").toString().trim())
-    .filter(Boolean)
-    .slice(0, 6);
 }
 
 const createCustomIcon = (niveau: "3" | "4" | "5" | "6" | "N/A") => {
@@ -106,19 +80,54 @@ function round1(n: number) {
   return Math.round(n * 10) / 10;
 }
 
+function splitTitle(intitule: string): { main: string; sub: string | null } {
+  const t = (intitule ?? "").toString().trim();
+  if (!t) return { main: "Formation", sub: null };
+
+  const colonIdx = t.indexOf(" : ");
+  if (colonIdx > 4 && colonIdx < t.length - 4) {
+    return { main: t.slice(0, colonIdx).trim(), sub: t.slice(colonIdx + 3).trim() || null };
+  }
+
+  const openIdx = t.indexOf("(");
+  const closeIdx = t.indexOf(")");
+  if (openIdx >= 0 && closeIdx > openIdx) {
+    const before = t.slice(0, openIdx).trim();
+    const inside = t.slice(openIdx + 1, closeIdx).trim();
+    const after = t.slice(closeIdx + 1).trim();
+    const subParts = [inside, after].filter(Boolean);
+    const sub = subParts.length ? subParts.join(" — ") : null;
+    if (before && before.length >= 6) return { main: before, sub };
+  }
+
+  const patterns = [" SPE ", " SPECIALITE ", " SPÉCIALITÉ ", " OPTION ", " PARCOURS "];
+  const upper = t.toUpperCase();
+  for (const p of patterns) {
+    const idx = upper.indexOf(p);
+    if (idx > 6 && idx < t.length - 6) {
+      return { main: t.slice(0, idx).trim(), sub: t.slice(idx).trim() || null };
+    }
+  }
+
+  return { main: t, sub: null };
+}
+
+function getWhyReasons(f: Formation): string[] {
+  const reasons = (f.match?.reasons ?? [])
+    .map((x) => (x ?? "").toString().trim())
+    .filter(Boolean);
+
+  return reasons.length ? reasons.slice(0, 3) : ["Résultat pertinent selon votre recherche"];
+}
+
 function MapBounds({ formations }: { formations: Formation[] }) {
   const map = useMap();
 
   useEffect(() => {
     if (!formations.length) return;
 
-    const bounds = L.latLngBounds(
-      formations.map((f) => [f.lat as number, f.lon as number] as [number, number])
-    );
-
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [50, 50] });
-    }
+    const bounds = L.latLngBounds(formations.map((f) => [f.lat as number, f.lon as number] as [number, number]));
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
   }, [formations, map]);
 
   return null;
@@ -130,7 +139,6 @@ function MapController({ selected }: { selected: Formation | null }) {
   useEffect(() => {
     if (!selected) return;
     if (typeof selected.lat !== "number" || typeof selected.lon !== "number") return;
-
     map.flyTo([selected.lat, selected.lon], 12, { duration: 1.5 });
   }, [selected, map]);
 
@@ -150,9 +158,7 @@ function FormationMarker({
   const [whyOpen, setWhyOpen] = useState(false);
 
   useEffect(() => {
-    if (isSelected && markerRef.current) {
-      markerRef.current.openPopup();
-    }
+    if (isSelected && markerRef.current) markerRef.current.openPopup();
   }, [isSelected]);
 
   const niveauNorm = normalizeNiveau(formation.niveau);
@@ -166,71 +172,57 @@ function FormationMarker({
   const distOk = typeof formation.distance_km === "number" && formation.distance_km < 900;
   const distLabel = distOk ? `${round1(formation.distance_km)} km` : null;
 
-  const { title, subtitle } = splitIntitule(formation.intitule);
-  const reasons = formatReasons(formation.match?.reasons);
-  const score = typeof formation.match?.score === "number" ? formation.match.score : null;
+  const { main, sub } = splitTitle(formation.intitule);
+  const whyReasons = getWhyReasons(formation);
 
   return (
     <Marker
       ref={markerRef}
       position={[formation.lat as number, formation.lon as number]}
       icon={createCustomIcon(niveauNorm)}
-      eventHandlers={{
-        click: () => onFormationClick?.(formation),
-      }}
+      eventHandlers={{ click: () => onFormationClick?.(formation) }}
     >
       <Popup>
         <div className="p-3 min-w-[280px] max-w-[340px]">
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-gray-900 text-sm leading-tight">{title}</h3>
-              {subtitle ? (
-                <div className="mt-0.5 text-[11px] text-gray-500 leading-snug">
-                  {subtitle}
-                </div>
-              ) : null}
+              <div className="flex items-start gap-2">
+                <h3 className="font-bold text-gray-900 text-sm leading-tight">{main}</h3>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setWhyOpen((v) => !v);
+                  }}
+                  className="mt-0.5 inline-flex items-center justify-center rounded hover:bg-gray-200/60 p-1"
+                  title="Pourquoi cette formation ?"
+                  aria-label="Pourquoi cette formation ?"
+                >
+                  <CircleHelp className="h-4 w-4 text-gray-500" />
+                </button>
+              </div>
+
+              {sub ? <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{sub}</div> : null}
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setWhyOpen((v) => !v);
-                }}
-                className="p-1 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700"
-                aria-label="Pourquoi cette formation ?"
-                title="Pourquoi cette formation ?"
-              >
-                <HelpCircle className="h-4 w-4" />
-              </button>
-
-              <span
-                className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
-                  niveauNorm
-                )}`}
-              >
-                {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
-              </span>
-            </div>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
+                niveauNorm
+              )}`}
+            >
+              {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
+            </span>
           </div>
 
           {whyOpen ? (
-            <div className="mb-2 rounded-lg border border-gray-200 bg-white p-2 text-[11px] text-gray-700">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold">Pourquoi ?</div>
-                {score !== null ? <div className="text-[10px] font-bold text-gray-600">Score&nbsp;: {score}</div> : null}
-              </div>
-
-              {reasons.length ? (
-                <ul className="mt-1 list-disc pl-4 space-y-0.5">
-                  {reasons.map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="mt-1 text-gray-500 italic">Raisons non disponibles.</div>
-              )}
+            <div className="mb-2 rounded-md border border-gray-200 bg-white p-2">
+              <div className="text-[11px] font-bold text-gray-800 mb-1">Pourquoi cette formation ?</div>
+              <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-gray-700">
+                {whyReasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
@@ -244,11 +236,9 @@ function FormationMarker({
               <MapPin className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
               <div className="flex items-center gap-2">
                 <span>{villeLabel}</span>
-                {distLabel && (
-                  <span className="bg-gray-200 text-gray-700 px-1.5 rounded text-[10px] font-semibold">
-                    {distLabel}
-                  </span>
-                )}
+                {distLabel ? (
+                  <span className="bg-gray-200 text-gray-700 px-1.5 rounded text-[10px] font-semibold">{distLabel}</span>
+                ) : null}
               </div>
             </div>
 
@@ -342,7 +332,10 @@ export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(({ fo
             key={key}
             formation={formation}
             isSelected={selectedKey === key}
-            onFormationClick={onFormationClick}
+            onFormationClick={(f) => {
+              setSelectedKey(key);
+              onFormationClick?.(f);
+            }}
           />
         );
       })}
