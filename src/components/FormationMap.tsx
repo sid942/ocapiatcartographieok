@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
-import { Building2, MapPin, Award, FileText, Briefcase, ExternalLink } from "lucide-react";
+import { Building2, MapPin, Award, FileText, Briefcase, ExternalLink, HelpCircle } from "lucide-react";
 import type { Formation } from "../types";
 import "leaflet/dist/leaflet.css";
 
@@ -23,6 +23,40 @@ function normalizeNiveau(n: string | undefined | null): "3" | "4" | "5" | "6" | 
 function formationKey(f: Formation, idx: number) {
   if (f.id) return f.id;
   return `${f.intitule}|${f.organisme}|${f.ville ?? ""}|${idx}`;
+}
+
+function splitIntitule(raw: string | undefined | null): { title: string; subtitle?: string } {
+  const s = (raw ?? "").toString().trim();
+  if (!s) return { title: "Formation" };
+
+  const colonIdx = s.indexOf(":");
+  if (colonIdx > 6) {
+    const left = s.slice(0, colonIdx).trim();
+    const right = s.slice(colonIdx + 1).trim();
+    if (left && right) return { title: left, subtitle: right };
+  }
+
+  const mParen = s.match(/^(.*)\(([^)]+)\)\s*$/);
+  if (mParen?.[1]?.trim() && mParen?.[2]?.trim()) {
+    return { title: mParen[1].trim(), subtitle: mParen[2].trim() };
+  }
+
+  const dashIdx = s.indexOf(" - ");
+  if (dashIdx > 6) {
+    const left = s.slice(0, dashIdx).trim();
+    const right = s.slice(dashIdx + 3).trim();
+    if (left && right) return { title: left, subtitle: right };
+  }
+
+  return { title: s };
+}
+
+function formatReasons(reasons: any): string[] {
+  if (!Array.isArray(reasons)) return [];
+  return reasons
+    .map((r) => (r ?? "").toString().trim())
+    .filter(Boolean)
+    .slice(0, 6);
 }
 
 const createCustomIcon = (niveau: "3" | "4" | "5" | "6" | "N/A") => {
@@ -70,94 +104,6 @@ const getLevelColor = (niveau: "3" | "4" | "5" | "6" | "N/A") => {
 
 function round1(n: number) {
   return Math.round(n * 10) / 10;
-}
-
-function clampText(s: string, max = 110) {
-  const t = (s ?? "").trim();
-  if (t.length <= max) return t;
-  return t.slice(0, max - 1).trimEnd() + "…";
-}
-
-function computeAlternance(f: Formation): "Oui" | "Non" {
-  if (f.alternance === "Oui") return "Oui";
-  if (f.alternance === "Non") return "Non";
-
-  const m = (f.modalite ?? "").toLowerCase();
-  if (m.includes("apprentissage") || m.includes("alternance")) return "Oui";
-  return "Non";
-}
-
-/**
- * Nettoie l'intitulé :
- * - garde le diplôme (parenthèse finale) dans le titre principal
- * - retire la spécialité du titre (SPE / ":" / " - ")
- * - renvoie specialty à afficher en petit dessous
- */
-function splitIntitule(intitule: string): { titleMain: string; specialty?: string } {
-  const raw = (intitule ?? "").toString().trim();
-  if (!raw) return { titleMain: "" };
-
-  // extrait la dernière parenthèse finale (souvent le diplôme)
-  let diplomaSuffix = "";
-  let base = raw;
-
-  const diplomaMatch = base.match(/\s*\(([^)]+)\)\s*$/);
-  if (diplomaMatch?.[0]) {
-    diplomaSuffix = diplomaMatch[0].trim();
-    base = base.slice(0, base.length - diplomaMatch[0].length).trim();
-  }
-
-  // spécialité via "SPE" / "SPECIALITE"
-  const speMatch = base.match(/\b(SPE|SPECIALITE)\b/i);
-  if (speMatch?.index !== undefined) {
-    const left = base.slice(0, speMatch.index).trim();
-    const right = base
-      .slice(speMatch.index + speMatch[0].length)
-      .replace(/^[:\-–—]\s*/g, "")
-      .trim();
-
-    const main = `${left}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim();
-    const specialty = right ? right : undefined;
-    return { titleMain: main, specialty };
-  }
-
-  // split sur ":"
-  if (base.includes(":")) {
-    const [left, ...rest] = base.split(":");
-    const right = rest.join(":").trim();
-    const main = `${left.trim()}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim();
-    const specialty = right ? right : undefined;
-    return { titleMain: main, specialty };
-  }
-
-  // split sur " - "
-  if (base.includes(" - ")) {
-    const [left, ...rest] = base.split(" - ");
-    const right = rest.join(" - ").trim();
-    const main = `${left.trim()}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim();
-    const specialty = right ? right : undefined;
-    return { titleMain: main, specialty };
-  }
-
-  return { titleMain: `${base}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim() };
-}
-
-function buildWhyText(f: Formation, distLabel: string | null) {
-  const reasons = Array.isArray(f.match?.reasons) ? f.match!.reasons : [];
-  const score = typeof f.match?.score === "number" ? f.match!.score : null;
-
-  const lines: string[] = [];
-  lines.push("Pourquoi cette formation ?");
-  if (reasons.length > 0) {
-    for (const r of reasons.slice(0, 4)) lines.push(`• ${r}`);
-  } else {
-    lines.push("• Correspondance globale avec votre recherche");
-  }
-
-  if (score !== null) lines.push(`• Score de pertinence : ${score}`);
-  if (distLabel) lines.push(`• Distance : ${distLabel}`);
-
-  return lines.join("\n");
 }
 
 function MapBounds({ formations }: { formations: Formation[] }) {
@@ -213,15 +159,16 @@ function FormationMarker({
 
   const rncp = formation.rncp ?? "Non renseigné";
   const categorie = formation.categorie ?? "Diplôme / Titre";
-  const alternance = computeAlternance(formation);
+  const alternance = formation.alternance ?? "Non";
 
   const villeLabel = formation.ville ?? "Ville non renseignée";
 
   const distOk = typeof formation.distance_km === "number" && formation.distance_km < 900;
   const distLabel = distOk ? `${round1(formation.distance_km)} km` : null;
 
-  const { titleMain, specialty } = splitIntitule(formation.intitule || "");
-  const whyText = buildWhyText(formation, distLabel);
+  const { title, subtitle } = splitIntitule(formation.intitule);
+  const reasons = formatReasons(formation.match?.reasons);
+  const score = typeof formation.match?.score === "number" ? formation.match.score : null;
 
   return (
     <Marker
@@ -236,59 +183,56 @@ function FormationMarker({
         <div className="p-3 min-w-[280px] max-w-[340px]">
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex-1 min-w-0">
-              <div className="flex items-start gap-2">
-                <h3 className="font-bold text-gray-900 text-sm leading-tight break-words">
-                  {titleMain || formation.intitule}
-                </h3>
-
-                {/* "?" why */}
-                <div className="relative flex-shrink-0">
-                  <button
-                    type="button"
-                    aria-label="Pourquoi cette formation ?"
-                    className="mt-0.5 h-5 w-5 rounded-full border border-gray-300 text-[11px] font-bold text-gray-600 hover:text-gray-900 hover:border-gray-400 bg-white flex items-center justify-center"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setWhyOpen((v) => !v);
-                    }}
-                    onMouseEnter={() => setWhyOpen(true)}
-                    onMouseLeave={() => setWhyOpen(false)}
-                  >
-                    ?
-                  </button>
-
-                  {whyOpen && (
-                    <div
-                      className="absolute right-0 mt-2 w-[260px] bg-white border border-gray-200 rounded-lg shadow-xl p-2 z-50"
-                      onClick={(e) => e.stopPropagation()}
-                      onMouseEnter={() => setWhyOpen(true)}
-                      onMouseLeave={() => setWhyOpen(false)}
-                      role="tooltip"
-                    >
-                      <div className="text-[11px] text-gray-800 whitespace-pre-line leading-snug">
-                        {whyText}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
-                    niveauNorm
-                  )}`}
-                >
-                  {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
-                </span>
-              </div>
-
-              {/* Spécialité discrète */}
-              {specialty && (
+              <h3 className="font-bold text-gray-900 text-sm leading-tight">{title}</h3>
+              {subtitle ? (
                 <div className="mt-0.5 text-[11px] text-gray-500 leading-snug">
-                  <span className="italic">Spécialité :</span> {clampText(specialty, 95)}
+                  {subtitle}
                 </div>
-              )}
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setWhyOpen((v) => !v);
+                }}
+                className="p-1 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                aria-label="Pourquoi cette formation ?"
+                title="Pourquoi cette formation ?"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </button>
+
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
+                  niveauNorm
+                )}`}
+              >
+                {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
+              </span>
             </div>
           </div>
+
+          {whyOpen ? (
+            <div className="mb-2 rounded-lg border border-gray-200 bg-white p-2 text-[11px] text-gray-700">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold">Pourquoi ?</div>
+                {score !== null ? <div className="text-[10px] font-bold text-gray-600">Score&nbsp;: {score}</div> : null}
+              </div>
+
+              {reasons.length ? (
+                <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                  {reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-1 text-gray-500 italic">Raisons non disponibles.</div>
+              )}
+            </div>
+          ) : null}
 
           <div className="space-y-1.5 text-xs text-gray-600">
             <div className="flex items-start gap-2">
@@ -312,11 +256,7 @@ function FormationMarker({
               <Award className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
               <span title="Répertoire National des Certifications Professionnelles">
                 RNCP&nbsp;:{" "}
-                {rncp !== "Non renseigné" ? (
-                  <span className="font-mono text-gray-700">{rncp}</span>
-                ) : (
-                  "Non renseigné"
-                )}
+                {rncp !== "Non renseigné" ? <span className="font-mono text-gray-700">{rncp}</span> : "Non renseigné"}
               </span>
             </div>
 
@@ -339,7 +279,6 @@ function FormationMarker({
                   href={formation.site_web}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
                   className="text-[#F5A021] hover:text-[#e69116] hover:underline font-semibold"
                 >
                   Voir le site de l&apos;école
@@ -382,7 +321,6 @@ export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(({ fo
         if (formation.id && f.id && formation.id === f.id) return true;
         return formationKey(f, i) === formationKey(formation, i);
       });
-
       if (idx >= 0) setSelectedKey(formationKey(validFormations[idx], idx));
     },
   }));
