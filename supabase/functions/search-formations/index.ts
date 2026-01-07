@@ -10,6 +10,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
  * ✅ Garde-fous métier progressifs (strict fort, relaxed/fallback plus souple)
  * ✅ Dédup intelligente + cap
  * ✅ count_total + count_affiche + debug
+ *
+ * ✅ NEW: garde-fou global anti hors-sujet
+ *     -> si aucun signal métier (strong/syn/context) ET pas de ROME => on ignore
  */
 
 // ==================================================================================
@@ -673,6 +676,15 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   const synHits = countHits(fullText, config.synonyms);
   const weakHits = countHits(fullText, config.weak_keywords);
 
+  // ✅ NEW : garde-fou global anti hors-sujet
+  // si aucun signal métier et pas de ROME => on ignore direct
+  const ctxList = config.context_keywords ?? [];
+  const ctxHits = ctxList.length > 0 ? countHits(fullText, ctxList) : 0;
+
+  if (!hasRome && strongHits === 0 && synHits === 0 && ctxHits === 0) {
+    return null;
+  }
+
   if (strongHits > 0) {
     score += Math.min(45, strongHits * 10);
     reasons.push(`${strongHits} mot(s) clé(s) métier`);
@@ -695,8 +707,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   // Objectif : éviter les dérives (agréeur -> chimie), sans retomber en 0 sur métiers rares.
   const ctx = config.context_keywords ?? [];
   if (ctx.length > 0) {
-    const ctxHits = countHits(fullText, ctx);
-
     if (ctxHits === 0) {
       // pénalité forte, mais pas “mortelle”
       // => en strict ça tombe sous min_score, en relaxed/fallback ça peut survivre si vraiment rien d’autre
@@ -954,7 +964,8 @@ function detectJobKey(inputMetier: any): string {
   if (cleaned.includes("logistique")) return "responsable_logistique";
   if (cleaned.includes("magasinier") || cleaned.includes("cariste")) return "magasinier_cariste";
 
-  if (cleaned.includes("qualite") && (cleaned.includes("controle") || cleaned.includes("controleur"))) return "controleur_qualite";
+  if (cleaned.includes("qualite") && (cleaned.includes("controle") || cleaned.includes("controleur")))
+    return "controleur_qualite";
   if (cleaned.includes("agreeur")) return "agreeur";
 
   if (cleaned.includes("conducteur") && cleaned.includes("ligne")) return "conducteur_ligne";
@@ -997,7 +1008,11 @@ Deno.serve(async (req: Request) => {
     const villeRef = geoData.features[0].properties.label;
 
     // 1) Strict + meilleurs candidats
-    const { strictKept, bestCandidates, appliedRadius, expanded, debug } = await getStrictAndCandidates(config, userLat, userLon);
+    const { strictKept, bestCandidates, appliedRadius, expanded, debug } = await getStrictAndCandidates(
+      config,
+      userLat,
+      userLon
+    );
 
     const target = Math.max(6, config.target_min_results);
     const cap = config.max_results ?? 60;
@@ -1005,7 +1020,7 @@ Deno.serve(async (req: Request) => {
     let mode: Mode = "strict";
     let merged: ScoredFormation[] = strictKept;
 
-    // 2) Si strict insuffisant => on complète avec relaxed (sur bestCandidates, pas seulement dernier rayon)
+    // 2) Si strict insuffisant => on complète avec relaxed
     if (merged.length < target) {
       const relaxedPicked = pickRelaxed(bestCandidates, config);
       merged = mergeKeepBest(merged, relaxedPicked);
@@ -1017,7 +1032,6 @@ Deno.serve(async (req: Request) => {
       const fallbackRomes = Array.from(new Set([...(config.fallback_romes ?? []), ...config.romes])).filter(Boolean);
 
       if (fallbackRomes.length > 0) {
-        // rayon fallback : au minimum rayon actuel ou rayon de base + 150
         const fbRadius = Math.max(appliedRadius, config.radius_km + 150);
 
         const fetchedFB = await fetchLBA(fallbackRomes, userLat, userLon, fbRadius);
@@ -1101,7 +1115,6 @@ Deno.serve(async (req: Request) => {
 
         mode,
 
-        // ✅ humain : total vs affiché
         count_total: count_total_avant_filtre,
         count: results.length,
 
@@ -1118,9 +1131,9 @@ Deno.serve(async (req: Request) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
-    return new Response(
-      JSON.stringify({ error: error?.message || "Erreur inconnue" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: error?.message || "Erreur inconnue" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
