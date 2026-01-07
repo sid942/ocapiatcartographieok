@@ -23,7 +23,24 @@ function normalizeForSearch(s: string) {
   return (s ?? "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, ""); // retire accents
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function humanizeMode(mode?: SearchMode) {
+  switch (mode) {
+    case "strict":
+      return { label: "Strict", hint: "Résultats très pertinents uniquement." };
+    case "relaxed":
+      return { label: "Élargi", hint: "On garde les plus proches quand c’est trop strict." };
+    case "fallback_rome":
+      return { label: "Secours ROME", hint: "ROME élargi pour éviter un résultat vide (scoring garde la cohérence)." };
+    case "strict+relaxed":
+      return { label: "Strict + Élargi", hint: "Strict d’abord, puis élargi pour compléter." };
+    case "strict+relaxed+fallback_rome":
+      return { label: "Strict + Élargi + Secours ROME", hint: "Tous les filets de sécurité activés." };
+    default:
+      return null;
+  }
 }
 
 function App() {
@@ -34,14 +51,18 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // Pour UI "humaine"
   const [searchMeta, setSearchMeta] = useState<{
     metier: string;
     ville: string;
     rayon: string;
+
+    // ✅ count affiché (après filtre niveau)
     count: number;
+
+    // ✅ total trouvé (avant filtre niveau) — nouveau
+    countTotal?: number;
+
     mode?: SearchMode;
-    // debug utile pour comprendre les 0 résultats (sans l’afficher forcément)
     debug?: SearchFormationsResponse["debug"];
   } | null>(null);
 
@@ -76,7 +97,10 @@ function App() {
         metier: api.metier_detecte,
         ville: api.ville_reference,
         rayon: api.rayon_applique,
+
         count: typeof api.count === "number" ? api.count : results.length,
+        countTotal: typeof api.count_total === "number" ? api.count_total : undefined,
+
         mode: api.mode,
         debug: api.debug,
       });
@@ -108,31 +132,24 @@ function App() {
   const isExpandedRadius =
     !!searchMeta?.rayon && normalizeForSearch(searchMeta.rayon).includes("elargi");
 
-  const isRelaxed = searchMeta?.mode === "relaxed";
+  const modeInfo = humanizeMode(searchMeta?.mode);
+  const isNonStrictMode =
+    searchMeta?.mode &&
+    searchMeta.mode !== "strict";
 
-  // Message “humain” contextualisé
   const emptyStateMessage = (() => {
-    // si ton backend a du debug, on s’en sert pour différencier "LBA vide" vs "scoring trop strict"
     const dbg = searchMeta?.debug;
     const raw = dbg?.raw_count_last ?? undefined;
     const keptStrict = dbg?.kept_count_strict_last ?? undefined;
 
-    // Cas 1: LBA ne renvoie quasi rien sur la zone/ROME
     if (typeof raw === "number" && raw === 0) {
-      return "Aucune formation trouvée dans la base pour cette zone (réessayez une ville plus grande ou un métier proche).";
+      return "Aucune formation trouvée dans la base pour cette zone. Essayez une ville plus grande ou un métier voisin.";
     }
 
-    // Cas 2: LBA renvoie des choses, mais le scoring strict filtre tout
     if (typeof raw === "number" && raw > 0 && typeof keptStrict === "number" && keptStrict === 0) {
-      return "On a trouvé des formations, mais aucune n’a passé le filtre de pertinence. Essayez d’élargir la zone ou de choisir un métier voisin.";
+      return "Des formations existent, mais aucune n’a passé le filtre de pertinence. Essayez d’élargir la zone ou de choisir un métier voisin.";
     }
 
-    // Cas 3: fallback relax activé mais toujours rien (rare)
-    if (isRelaxed) {
-      return "Même en élargissant la pertinence, aucune formation exploitable n’a été trouvée. Essayez une autre zone ou un métier proche.";
-    }
-
-    // Défaut
     return "Essayez une autre zone ou élargissez la recherche. (Le moteur privilégie les formations les plus pertinentes.)";
   })();
 
@@ -195,13 +212,10 @@ function App() {
                 </div>
               )}
 
-              {searchMeta.mode && (
+              {modeInfo && (
                 <div className="text-[10px] text-gray-500 italic pt-1 border-t border-[#47A152]/20">
-                  Mode pertinence :{" "}
-                  <span className="font-semibold">
-                    {searchMeta.mode === "strict" ? "strict" : "relax"}
-                  </span>
-                  {searchMeta.mode === "relaxed" ? " (on garde les plus proches quand c’est trop strict)" : ""}
+                  Mode pertinence : <span className="font-semibold">{modeInfo.label}</span>
+                  {modeInfo.hint ? <span className="block text-gray-500/90 mt-0.5">{modeInfo.hint}</span> : null}
                 </div>
               )}
             </div>
@@ -222,15 +236,15 @@ function App() {
           <div className="px-4 pb-4 animate-in fade-in duration-500">
             <div className="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               {formations.length} formation(s) affichée(s)
-              {typeof searchMeta?.count === "number" && searchMeta.count !== formations.length ? (
-                <span className="normal-case font-normal ml-1 text-gray-400">(sur {searchMeta.count})</span>
+              {typeof searchMeta?.countTotal === "number" && searchMeta.countTotal !== formations.length ? (
+                <span className="normal-case font-normal ml-1 text-gray-400">(sur {searchMeta.countTotal})</span>
               ) : null}
             </div>
 
-            {/* Si relaxed, on met un petit avertissement “humain” */}
-            {isRelaxed && (
+            {/* Si mode non strict, avertissement “humain” */}
+            {isNonStrictMode && (
               <div className="mb-3 text-[11px] text-gray-600 bg-yellow-50 border border-yellow-200 rounded-md p-2">
-                On a élargi la pertinence pour éviter un résultat vide. Les premiers résultats restent les plus proches.
+                On a activé un mode de secours pour éviter un résultat vide. Les premiers résultats restent les plus proches et les plus cohérents.
               </div>
             )}
 
