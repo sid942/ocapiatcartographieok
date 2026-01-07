@@ -91,12 +91,20 @@ export type SearchMode =
   | "strict+relaxed"
   | "strict+relaxed+fallback_rome";
 
+// ✅ aligné avec debug du backend V2.5
 export interface SearchDebugInfo {
   jobKey?: string;
+
   raw_count_last?: number;
   scored_count_last?: number;
   kept_count_strict_last?: number;
-  candidates_last_radius?: number;
+
+  best_candidates_count?: number;
+  last_status?: number;
+
+  strict_count?: number;
+  merged_count_before_level_filter?: number;
+  final_count_after_level_filter?: number;
 }
 
 export interface SearchFormationsResponse {
@@ -107,10 +115,12 @@ export interface SearchFormationsResponse {
   // ✅ présent dans ton backend
   mode?: SearchMode;
 
-  // ✅ NOUVEAU : total trouvé AVANT filtre niveau (si backend le renvoie)
+  // ✅ total trouvé AVANT filtre niveau
   count_total?: number;
 
+  // ✅ count affiché (APRÈS filtre niveau)
   count: number;
+
   niveau_filtre?: NiveauFiltre;
   formations: Formation[];
 
