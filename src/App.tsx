@@ -6,13 +6,18 @@ import { SearchForm } from "./components/SearchForm";
 import { FormationList } from "./components/FormationList";
 import { FormationMap, FormationMapRef } from "./components/FormationMap";
 
-import type { Formation, MetierKey, SearchFormationsResponse } from "./types";
-
-type Niveau = "3" | "4" | "5" | "6" | "all";
+import type { Formation, MetierKey, SearchFormationsResponse, NiveauFiltre } from "./types";
 
 // --- CONFIGURATION SUPABASE (idéalement à déplacer dans src/lib/supabase.ts) ---
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  // En prod tu peux préférer un fallback UI plutôt qu’un throw.
+  // Ici on throw pour que l’erreur soit claire au build/runtime.
+  throw new Error("Variables d'environnement Supabase manquantes (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).");
+}
+
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // -----------------------------------------------------------------------------
 
@@ -32,7 +37,7 @@ function App() {
     count: number;
   } | null>(null);
 
-  const handleSearch = async (metierKey: MetierKey, ville: string, niveau: Niveau) => {
+  const handleSearch = async (metierKey: MetierKey, ville: string, niveau: NiveauFiltre) => {
     setIsLoading(true);
     setError(null);
     setFormations([]);
@@ -40,9 +45,9 @@ function App() {
 
     try {
       const payload = {
-        metier: metierKey,      // clé stable
+        metier: metierKey, // clé stable backend
         ville: ville.trim(),
-        niveau,                 // IMPORTANT
+        niveau, // IMPORTANT
       };
 
       const { data, error: functionError } = await supabase.functions.invoke("search-formations", {
@@ -62,7 +67,7 @@ function App() {
         metier: api.metier_detecte,
         ville: api.ville_reference,
         rayon: api.rayon_applique,
-        count: api.count ?? results.length,
+        count: typeof api.count === "number" ? api.count : results.length,
       });
 
       // Zoom auto sur la première formation géolocalisée
@@ -82,12 +87,15 @@ function App() {
   };
 
   const handleFormationClick = (formation: Formation) => {
-    if (formation.lat && formation.lon && mapRef.current) {
+    if (typeof formation.lat === "number" && typeof formation.lon === "number" && mapRef.current) {
       mapRef.current.flyToFormation(formation);
     }
   };
 
   const showEmptyState = !isLoading && formations.length === 0 && !error && hasSearched;
+
+  const isExpandedRadius =
+    !!searchInfo?.rayon && searchInfo.rayon.toLowerCase().includes("elargi");
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
@@ -143,6 +151,12 @@ function App() {
                 <span>Rayon appliqué :</span>
                 <span>{searchInfo.rayon}</span>
               </div>
+
+              {isExpandedRadius && (
+                <div className="text-[10px] text-gray-500 italic pt-1 border-t border-[#47A152]/20">
+                  Rayon élargi automatiquement pour proposer assez de formations pertinentes.
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -161,6 +175,11 @@ function App() {
           <div className="px-4 pb-4 animate-in fade-in duration-500">
             <div className="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               {formations.length} formation(s) proposée(s)
+              {searchInfo?.count && searchInfo.count !== formations.length ? (
+                <span className="normal-case font-normal ml-1 text-gray-400">
+                  (sur {searchInfo.count})
+                </span>
+              ) : null}
             </div>
             <FormationList formations={formations} onFormationClick={handleFormationClick} />
           </div>
