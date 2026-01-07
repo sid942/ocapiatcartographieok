@@ -48,8 +48,90 @@ function computeAlternance(f: Formation): "Oui" | "Non" {
   return "Non";
 }
 
+function clampText(s: string, max = 110) {
+  const t = (s ?? "").trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + "…";
+}
+
+/**
+ * Nettoie l'intitulé pour :
+ * - garder le "diplôme" entre parenthèses à la fin (ex: (BTSA), (BTS), (BUT))
+ * - retirer la spécialité du gros titre (SPE / ":" / " - ")
+ * - afficher la spécialité en petit dessous
+ */
+function splitIntitule(intitule: string): { titleMain: string; specialty?: string } {
+  const raw = (intitule ?? "").toString().trim();
+  if (!raw) return { titleMain: "" };
+
+  // 1) extrait la dernière parenthèse finale (souvent le diplôme)
+  let diplomaSuffix = "";
+  let base = raw;
+
+  const diplomaMatch = base.match(/\s*\(([^)]+)\)\s*$/);
+  if (diplomaMatch?.[0]) {
+    diplomaSuffix = diplomaMatch[0].trim(); // ex: "(BTSA)"
+    base = base.slice(0, base.length - diplomaMatch[0].length).trim();
+  }
+
+  // 2) cherche une spécialité via "SPE" / "SPECIALITE"
+  const speMatch = base.match(/\b(SPE|SPECIALITE)\b/i);
+  if (speMatch?.index !== undefined) {
+    const left = base.slice(0, speMatch.index).trim();
+    const right = base
+      .slice(speMatch.index + speMatch[0].length)
+      .replace(/^[:\-–—]\s*/g, "")
+      .trim();
+
+    const main = `${left}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim();
+    const specialty = right ? right : undefined;
+    return { titleMain: main, specialty };
+  }
+
+  // 3) sinon, split sur ":" (ex: TECHNIQUES DE COMMERCIALISATION : BUSINESS INTERNATIONAL)
+  if (base.includes(":")) {
+    const [left, ...rest] = base.split(":");
+    const right = rest.join(":").trim();
+    const main = `${left.trim()}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim();
+    const specialty = right ? right : undefined;
+    return { titleMain: main, specialty };
+  }
+
+  // 4) sinon, split sur " - " (moins agressif)
+  if (base.includes(" - ")) {
+    const [left, ...rest] = base.split(" - ");
+    const right = rest.join(" - ").trim();
+    const main = `${left.trim()}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim();
+    const specialty = right ? right : undefined;
+    return { titleMain: main, specialty };
+  }
+
+  // 5) fallback : titre complet (avec diplôme)
+  return { titleMain: `${base}${diplomaSuffix ? " " + diplomaSuffix : ""}`.trim() };
+}
+
+function buildWhyText(f: Formation, distLabel: string) {
+  const reasons = Array.isArray(f.match?.reasons) ? f.match!.reasons : [];
+  const score = typeof f.match?.score === "number" ? f.match!.score : null;
+
+  const lines: string[] = [];
+  lines.push("Pourquoi cette formation ?");
+  if (reasons.length > 0) {
+    // on garde quelques raisons max
+    for (const r of reasons.slice(0, 4)) lines.push(`• ${r}`);
+  } else {
+    lines.push("• Correspondance globale avec votre recherche");
+  }
+
+  if (score !== null) lines.push(`• Score de pertinence : ${score}`);
+  if (distLabel) lines.push(`• Distance : ${distLabel}`);
+
+  return lines.join("\n");
+}
+
 export function FormationList({ formations, onFormationClick }: FormationListProps) {
   const [niveauFilter, setNiveauFilter] = useState<NiveauFilter>("all");
+  const [whyOpenId, setWhyOpenId] = useState<string | null>(null);
 
   const sortedFormations = useMemo(() => {
     const filtered = formations.filter((f) => {
@@ -109,6 +191,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
 
       <div className="space-y-2">
         {sortedFormations.map((formation, index) => {
+          const key = formationKey(formation, index);
           const niveauNorm = normalizeNiveau(formation.niveau);
 
           const hasDistance =
@@ -121,25 +204,73 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
           const villeLabel = formation.ville ?? "Ville non renseignée";
           const distLabel = hasDistance ? `${round1(formation.distance_km)} km` : "Non géolocalisé";
 
+          const { titleMain, specialty } = splitIntitule(formation.intitule || "");
+
+          const whyText = buildWhyText(formation, distLabel);
+          const hasWhy = true; // on l'affiche toujours, même si reasons vides
+
           return (
             <div
-              key={formationKey(formation, index)}
+              key={key}
               onClick={() => onFormationClick?.(formation)}
               className="bg-gray-50 rounded-lg border border-gray-200 p-3 hover:bg-white hover:shadow-lg hover:border-[#47A152] transition-all cursor-pointer group"
             >
               {/* Header */}
               <div className="flex items-start justify-between gap-2 mb-2">
-                <h3 className="font-bold text-gray-900 text-sm flex-1 leading-tight group-hover:text-[#47A152] transition-colors">
-                  {formation.intitule}
-                </h3>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start gap-2">
+                    <h3 className="font-bold text-gray-900 text-sm leading-tight group-hover:text-[#47A152] transition-colors break-words">
+                      {titleMain || formation.intitule}
+                    </h3>
 
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
-                    niveauNorm
-                  )}`}
-                >
-                  {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
-                </span>
+                    {hasWhy && (
+                      <div className="relative flex-shrink-0">
+                        <button
+                          type="button"
+                          aria-label="Pourquoi cette formation ?"
+                          className="mt-0.5 h-5 w-5 rounded-full border border-gray-300 text-[11px] font-bold text-gray-600 hover:text-gray-900 hover:border-gray-400 bg-white flex items-center justify-center"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setWhyOpenId((prev) => (prev === key ? null : key));
+                          }}
+                          onMouseEnter={() => setWhyOpenId(key)}
+                          onMouseLeave={() => setWhyOpenId((prev) => (prev === key ? null : prev))}
+                        >
+                          ?
+                        </button>
+
+                        {whyOpenId === key && (
+                          <div
+                            className="absolute right-0 mt-2 w-[260px] bg-white border border-gray-200 rounded-lg shadow-xl p-2 z-20"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseEnter={() => setWhyOpenId(key)}
+                            onMouseLeave={() => setWhyOpenId((prev) => (prev === key ? null : prev))}
+                            role="tooltip"
+                          >
+                            <div className="text-[11px] text-gray-800 whitespace-pre-line leading-snug">
+                              {whyText}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap uppercase tracking-wide ${getLevelColor(
+                        niveauNorm
+                      )}`}
+                    >
+                      {niveauNorm === "N/A" ? "N/A" : `NIV. ${niveauNorm}`}
+                    </span>
+                  </div>
+
+                  {/* Spécialité (discrète) */}
+                  {specialty && (
+                    <div className="mt-0.5 text-[11px] text-gray-500 leading-snug">
+                      <span className="italic">Spécialité :</span> {clampText(specialty, 90)}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Détails */}
@@ -206,9 +337,6 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                     <span className="italic">Site web non référencé</span>
                   </div>
                 )}
-
-                {/* Futur "?" (match.reasons) déjà prêt */}
-                {/* {formation.match?.reasons?.length ? (...) : null} */}
               </div>
             </div>
           );
