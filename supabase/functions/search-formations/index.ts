@@ -2,14 +2,14 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 /**
  * OCAPIAT - Search Formations (LBA)
- * Objectif : résultats pertinents et "humains" pour une utilisation au téléphone.
+ * V2.5 PRO+ (cohérent + humain + anti-0)
  *
- * V2 PRO:
- * - Strict adaptatif
- * - Fallback relaxed + fallback ROME par métier (anti-0)
- * - Garde-fous "cohérence métier" (ex: agréeur ≠ chimie/pharma)
- * - Dédup intelligente + cap résultats
- * - Debug fields conservés (à retirer ensuite)
+ * ✅ Strict adaptatif (prioritaire)
+ * ✅ Relaxed (complément si strict insuffisant, sans écraser)
+ * ✅ Fallback ROME (complément si toujours insuffisant)
+ * ✅ Garde-fous métier progressifs (strict fort, relaxed/fallback plus souple)
+ * ✅ Dédup intelligente + cap
+ * ✅ count_total + count_affiche + debug
  */
 
 // ==================================================================================
@@ -26,15 +26,12 @@ const corsHeaders = {
 // ==================================================================================
 
 type NiveauFiltre = "3" | "4" | "5" | "6" | "all";
-type Mode = "strict" | "relaxed" | "fallback_rome";
+type Mode = "strict" | "strict+relaxed" | "strict+relaxed+fallback_rome" | "relaxed" | "fallback_rome";
 
 interface JobProfile {
   label: string;
 
-  // ROME principaux
   romes: string[];
-
-  // ✅ ROME fallback si strict=0 (plus large mais contrôlé par scoring)
   fallback_romes?: string[];
 
   radius_km: number;
@@ -46,7 +43,6 @@ interface JobProfile {
   banned_keywords: string[];
   banned_phrases: string[];
 
-  // ✅ garde-fou : au moins 1 mot-clé “contexte métier”, sinon grosse pénalité
   context_keywords?: string[];
 
   min_score: number;
@@ -57,15 +53,12 @@ interface JobProfile {
   max_results?: number;
 }
 
-// Exclusions globales : uniquement les domaines clairement hors sujet
 const BANNED_GLOBAL_RAW = [
-  // sûreté / sécurité privée
   "surete",
   "systemes de surete",
   "agent de securite",
   "securite incendie",
 
-  // bâtiment
   "batiment",
   "macon",
   "maconnerie",
@@ -74,7 +67,6 @@ const BANNED_GLOBAL_RAW = [
   "electricien",
   "peintre",
 
-  // IT
   "informatique",
   "reseau",
   "developpeur",
@@ -83,13 +75,11 @@ const BANNED_GLOBAL_RAW = [
   "web",
   "logiciel",
 
-  // banque/assurance/immobilier
   "banque",
   "assurance",
   "immobilier",
   "credit",
 
-  // hôtellerie/restauration
   "cuisine",
   "restauration",
   "hotellerie",
@@ -97,12 +87,10 @@ const BANNED_GLOBAL_RAW = [
   "serveur",
   "barman",
 
-  // santé
   "infirmier",
   "aide soignant",
   "medical",
 
-  // juridique
   "avocat",
   "notaire",
 ];
@@ -111,9 +99,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
   silo: {
     label: "Agent de Silo",
     romes: ["A1416", "A1101"],
-    // ✅ fallback : on élargit un peu vers logistique terrain / cariste (souvent plus présent en LBA)
     fallback_romes: ["N1101", "N1303", "N1302"],
-
     radius_km: 70,
 
     strong_keywords: [
@@ -133,12 +119,8 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["stockage agricole", "collecte cereales", "silo agricole", "cerealiers"],
     weak_keywords: ["agricole", "logistique", "magasin", "cariste", "entrepot", "manutention"],
-
-    // évite les silos ciment / béton + bruit sécurité
     banned_keywords: ["ciment", "beton"],
     banned_phrases: ["silo a ciment", "silo beton", "systemes de surete", "surete", "securite incendie"],
-
-    // ✅ garde-fou : silo doit avoir au moins 1 signal “grain/silo”
     context_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage"],
 
     min_score: 35,
@@ -151,9 +133,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
   chauffeur: {
     label: "Chauffeur Agricole",
     romes: ["A1101", "N4101"],
-    // ✅ fallback : transport marchandises (plus présent)
     fallback_romes: ["N4102", "N4105", "N1303"],
-
     radius_km: 120,
 
     strong_keywords: [
@@ -176,11 +156,8 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["conducteur tracteur", "conduite d engins agricoles", "transport routier"],
     weak_keywords: ["transport", "livraison", "route", "logistique", "manutention"],
-
     banned_keywords: ["bus", "taxi", "ambulance", "vtc", "tourisme", "voyageurs"],
     banned_phrases: ["transport de personnes", "chauffeur de bus"],
-
-    // ✅ garde-fou : si aucun signal agri/engin → on pénalise (sinon tu récupères du transport générique)
     context_keywords: ["tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "agricole", "cereales", "recolte"],
 
     min_score: 32,
@@ -193,9 +170,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
   responsable_silo: {
     label: "Responsable de Silo",
     romes: ["A1301", "A1303"],
-    // ✅ fallback : responsable logistique / entrepôt (souvent plus présent)
     fallback_romes: ["N1301", "N1302", "N1303"],
-
     radius_km: 180,
 
     strong_keywords: [
@@ -218,11 +193,8 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["chef de silo", "responsable stockage", "gestionnaire silo", "responsable exploitation"],
     weak_keywords: ["management", "pilotage", "logistique", "entrepot", "supply chain"],
-
     banned_keywords: [],
     banned_phrases: ["systemes de surete", "surete", "securite incendie"],
-
-    // ✅ garde-fou : responsable silo doit garder du “silo/céréales”
     context_keywords: ["silo", "cereales", "collecte", "stockage", "sechage", "tri"],
 
     min_score: 34,
@@ -236,7 +208,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Responsable services techniques",
     romes: ["I1102"],
     fallback_romes: ["I1304", "I1103"],
-
     radius_km: 120,
 
     strong_keywords: [
@@ -254,7 +225,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["responsable maintenance", "chef maintenance", "technicien maintenance"],
     weak_keywords: ["industrie", "production", "site", "atelier"],
-
     banned_keywords: ["maintenance informatique", "reseau", "aeronautique", "avion"],
     banned_phrases: [],
 
@@ -269,7 +239,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Technico-commercial",
     romes: ["D1407", "D1402"],
     fallback_romes: ["D1401", "D1403"],
-
     radius_km: 120,
 
     strong_keywords: [
@@ -286,7 +255,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["commercial agricole", "conseiller agricole", "technico commercial agricole"],
     weak_keywords: ["commercial", "vente", "negociation", "relation client"],
-
     banned_keywords: ["immobilier", "assurance", "banque", "cosmetique", "mode", "textile"],
     banned_phrases: [],
 
@@ -301,7 +269,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Responsable logistique",
     romes: ["N1301", "N1302"],
     fallback_romes: ["N1303", "N1101"],
-
     radius_km: 120,
 
     strong_keywords: [
@@ -320,7 +287,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["responsable entrepot", "chef de quai", "gestionnaire logistique"],
     weak_keywords: ["management", "organisation", "pilotage"],
-
     banned_keywords: ["transport de personnes", "voyageurs"],
     banned_phrases: ["chauffeur de bus", "transport urbain"],
 
@@ -335,7 +301,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Magasinier / cariste",
     romes: ["N1101", "N1303"],
     fallback_romes: ["N1302", "N1301"],
-
     radius_km: 80,
 
     strong_keywords: [
@@ -354,7 +319,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["agent magasinier", "operateur logistique", "preparateur de commandes"],
     weak_keywords: ["magasin", "distribution"],
-
     banned_keywords: ["grue", "btp", "chantier"],
     banned_phrases: [],
 
@@ -369,7 +333,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Contrôleur qualité",
     romes: ["H1502", "H1506", "H1503"],
     fallback_romes: ["H1504"],
-
     radius_km: 120,
 
     strong_keywords: [
@@ -390,7 +353,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["assistant qualite", "technicien qualite", "agent qualite"],
     weak_keywords: ["industrie", "production"],
-
     banned_keywords: ["automobile", "aeronautique", "pharmaceutique", "cosmetique", "chimie"],
     banned_phrases: [],
 
@@ -405,7 +367,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Agréeur",
     romes: ["H1503", "N1303"],
     fallback_romes: ["H1502", "N1101"],
-
     radius_km: 150,
 
     strong_keywords: [
@@ -427,12 +388,8 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["agreeur fruits et legumes", "controle reception", "qualite alimentaire"],
     weak_keywords: ["qualite", "logistique", "entrepot"],
-
-    // ✅ stop chimie/pharma/cosméto
     banned_keywords: ["pharmaceutique", "cosmetique", "chimie", "biotech", "bio-industries", "industries pharmaceutiques"],
     banned_phrases: [],
-
-    // ✅ garde-fou fort : agréeur doit avoir un signal F&L / frais / agréage
     context_keywords: ["agreeur", "agreage", "fruits", "legumes", "produits frais", "calibrage", "frais"],
 
     min_score: 26,
@@ -446,7 +403,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Conducteur de ligne",
     romes: ["H2102"],
     fallback_romes: ["H2101"],
-
     radius_km: 120,
 
     strong_keywords: [
@@ -467,7 +423,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["operateur de production", "pilote de ligne", "conducteur d installation"],
     weak_keywords: ["industrie", "usine"],
-
     banned_keywords: ["imprimerie", "textile"],
     banned_phrases: [],
 
@@ -482,7 +437,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Technicien culture",
     romes: ["A1301"],
     fallback_romes: ["A1416", "A1203"],
-
     radius_km: 180,
 
     strong_keywords: [
@@ -503,11 +457,8 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["technicien agricole", "technicien cultural", "conseiller technique"],
     weak_keywords: ["environnement", "terrain"],
-
     banned_keywords: ["informatique", "reseau"],
     banned_phrases: [],
-
-    // garde-fou léger : culture/agronomie
     context_keywords: ["culture", "agronomie", "maraichage", "grandes cultures", "parcelles", "irrigation"],
 
     min_score: 26,
@@ -521,7 +472,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Commercial export",
     romes: ["D1402"],
     fallback_romes: ["D1401", "D1407"],
-
     radius_km: 200,
 
     strong_keywords: [
@@ -538,7 +488,6 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     ],
     synonyms: ["assistant import export", "responsable export", "charge d affaires export"],
     weak_keywords: ["commercial", "vente", "grands comptes"],
-
     banned_keywords: ["immobilier", "assurance", "banque"],
     banned_phrases: [],
 
@@ -553,13 +502,11 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     label: "Recherche Générale",
     romes: ["A1416"],
     fallback_romes: ["N1303", "N1101"],
-
     radius_km: 80,
 
     strong_keywords: [],
     synonyms: [],
     weak_keywords: [],
-
     banned_keywords: [],
     banned_phrases: [],
 
@@ -608,14 +555,12 @@ function includesPhrase(text: string, phrase: string): boolean {
 
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) *
-      Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
@@ -740,19 +685,22 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 
   if (weakHits > 0) score += Math.min(12, weakHits * 3);
 
-  // Pénalité ROME seul (mais pas destructrice)
+  // Pénalité ROME seul (pas destructrice)
   if (hasRome && strongHits === 0 && synHits === 0) {
     score -= 10;
     reasons.push("ROME seul (prudence)");
   }
 
-  // ✅ GARDE-FOU CONTEXTE MÉTIER
-  // Si le métier exige un contexte (agréeur, silo, chauffeur...), et qu'il n'y a AUCUN signal => grosse pénalité
+  // ✅ GARDE-FOU CONTEXTE (progressif)
+  // Objectif : éviter les dérives (agréeur -> chimie), sans retomber en 0 sur métiers rares.
   const ctx = config.context_keywords ?? [];
   if (ctx.length > 0) {
     const ctxHits = countHits(fullText, ctx);
+
     if (ctxHits === 0) {
-      score -= 25;
+      // pénalité forte, mais pas “mortelle”
+      // => en strict ça tombe sous min_score, en relaxed/fallback ça peut survivre si vraiment rien d’autre
+      score -= 18;
       reasons.push("hors contexte métier");
     } else {
       score += Math.min(10, ctxHits * 4);
@@ -792,7 +740,7 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 }
 
 // ==================================================================================
-// 4) LBA FETCH + RAYON ADAPTATIF
+// 4) LBA FETCH + DÉDUP
 // ==================================================================================
 
 async function fetchLBA(romes: string[], lat: number, lon: number, radiusKm: number) {
@@ -804,10 +752,11 @@ async function fetchLBA(romes: string[], lat: number, lon: number, radiusKm: num
     `&caller=ocapiat_app`;
 
   const res = await fetch(url);
-  if (!res.ok) return { results: [], raw_count: 0 };
+  if (!res.ok) return { results: [], raw_count: 0, status: res.status };
+
   const data = await res.json().catch(() => null);
   const results = Array.isArray(data?.results) ? data.results : [];
-  return { results, raw_count: results.length };
+  return { results, raw_count: results.length, status: 200 };
 }
 
 function dedupKey(s: ScoredFormation): string {
@@ -815,7 +764,6 @@ function dedupKey(s: ScoredFormation): string {
 }
 
 function titleKey(s: ScoredFormation): string {
-  // dédup “humain” : même titre (souvent multiplié par organismes)
   return cleanText(s.title);
 }
 
@@ -827,7 +775,6 @@ function sortByScoreThenDistance(a: ScoredFormation, b: ScoredFormation) {
 }
 
 function dedupSmart(items: ScoredFormation[], maxPerTitle = 3) {
-  // 1) dédup strict (title+org+city)
   const seen = new Set<string>();
   const unique = items.filter((s) => {
     const k = dedupKey(s);
@@ -836,7 +783,6 @@ function dedupSmart(items: ScoredFormation[], maxPerTitle = 3) {
     return true;
   });
 
-  // 2) limite par titre (évite 15 fois le même BTS)
   const counts = new Map<string, number>();
   const limited = unique.filter((s) => {
     const tk = titleKey(s);
@@ -848,15 +794,63 @@ function dedupSmart(items: ScoredFormation[], maxPerTitle = 3) {
   return limited;
 }
 
-async function getScoredResultsAdaptive(
+function mergeKeepBest(base: ScoredFormation[], extra: ScoredFormation[]) {
+  const map = new Map<string, ScoredFormation>();
+
+  // garde le meilleur (score + distance)
+  const keep = (s: ScoredFormation) => {
+    const k = dedupKey(s);
+    const existing = map.get(k);
+    if (!existing) {
+      map.set(k, s);
+      return;
+    }
+    const best = [existing, s].sort(sortByScoreThenDistance)[0];
+    map.set(k, best);
+  };
+
+  base.forEach(keep);
+  extra.forEach(keep);
+
+  return Array.from(map.values()).sort(sortByScoreThenDistance);
+}
+
+function pickRelaxed(allCandidates: ScoredFormation[], config: JobProfile) {
+  const relaxedMin = config.relaxed_min_score ?? Math.max(12, config.min_score - 12);
+
+  const relaxed = allCandidates
+    .filter((s) => s.score >= relaxedMin)
+    .sort(sortByScoreThenDistance);
+
+  const cap = config.max_results ?? 60;
+
+  if (relaxed.length === 0) {
+    return [...allCandidates].sort(sortByScoreThenDistance).slice(0, Math.min(25, cap));
+  }
+
+  return relaxed.slice(0, cap);
+}
+
+// ==================================================================================
+// 5) STRICT ADAPTATIF (et on garde aussi les meilleurs candidats du meilleur rayon)
+// ==================================================================================
+
+async function getStrictAndCandidates(
   config: JobProfile,
   userLat: number,
   userLon: number
 ): Promise<{
-  scoredStrict: ScoredFormation[];
+  strictKept: ScoredFormation[];
+  bestCandidates: ScoredFormation[];
   appliedRadius: number;
   expanded: boolean;
-  debug: { raw_count_last: number; scored_count_last: number; kept_count_strict_last: number };
+  debug: {
+    raw_count_last: number;
+    scored_count_last: number;
+    kept_count_strict_last: number;
+    best_candidates_count: number;
+    last_status?: number;
+  };
 }> {
   const baseRadius = config.radius_km;
   const steps = [0, 30, 60, 100, 150, 200, 300].filter((s) => s <= config.max_extra_radius_km);
@@ -867,43 +861,62 @@ async function getScoredResultsAdaptive(
   let raw_count_last = 0;
   let scored_count_last = 0;
   let kept_count_strict_last = 0;
+  let last_status: number | undefined;
 
   let finalStrict: ScoredFormation[] = [];
+
+  // on garde les meilleurs candidats “bruts” (scorés) du rayon qui ramène le plus de data
+  let bestCandidates: ScoredFormation[] = [];
+  let bestRawCount = -1;
 
   for (const extra of steps) {
     appliedRadius = baseRadius + extra;
     expanded = extra > 0;
 
-    const { results: raw, raw_count } = await fetchLBA(config.romes, userLat, userLon, appliedRadius);
-    raw_count_last = raw_count;
+    const fetched = await fetchLBA(config.romes, userLat, userLon, appliedRadius);
+    const raw = fetched.results;
+    raw_count_last = fetched.raw_count;
+    last_status = fetched.status;
 
-    const scored = raw
+    const scoredAll = raw
       .map((r: any) => scoreFormation(r, config, userLat, userLon))
       .filter(Boolean) as ScoredFormation[];
 
-    scored_count_last = scored.length;
+    scored_count_last = scoredAll.length;
 
-    const keptStrict = scored.filter((s) => s.score >= config.min_score);
+    // meilleur rayon “candidats”
+    if (raw_count_last > bestRawCount) {
+      bestRawCount = raw_count_last;
+      bestCandidates = dedupSmart(scoredAll, 3).sort(sortByScoreThenDistance);
+    }
+
+    const keptStrict = scoredAll.filter((s) => s.score >= config.min_score);
     kept_count_strict_last = keptStrict.length;
 
-    const dedup = dedupSmart(keptStrict, 3).sort(sortByScoreThenDistance);
-    finalStrict = dedup;
+    finalStrict = dedupSmart(keptStrict, 3).sort(sortByScoreThenDistance);
 
-    if (DEBUG) console.log("radius", appliedRadius, "raw", raw_count, "keptStrict", finalStrict.length);
+    if (DEBUG) console.log("radius", appliedRadius, "raw", raw_count_last, "strict", finalStrict.length);
 
     if (finalStrict.length >= config.target_min_results) break;
   }
 
   return {
-    scoredStrict: finalStrict,
+    strictKept: finalStrict,
+    bestCandidates,
     appliedRadius,
     expanded,
-    debug: { raw_count_last, scored_count_last, kept_count_strict_last },
+    debug: {
+      raw_count_last,
+      scored_count_last,
+      kept_count_strict_last,
+      best_candidates_count: bestCandidates.length,
+      last_status,
+    },
   };
 }
 
 // ==================================================================================
-// 5) METIER DETECTION (alignement UI ↔ backend)
+// 6) METIER DETECTION
 // ==================================================================================
 
 const METIER_KEY_ALIASES: Record<string, string> = {
@@ -928,7 +941,6 @@ function detectJobKey(inputMetier: any): string {
   if (JOB_CONFIG[raw]) return raw;
   if (JOB_CONFIG[cleaned]) return cleaned;
 
-  // fallback fuzzy minimal
   if (cleaned.includes("responsable") && cleaned.includes("silo")) return "responsable_silo";
   if (cleaned.includes("silo")) return "silo";
 
@@ -954,27 +966,6 @@ function detectJobKey(inputMetier: any): string {
   if (cleaned.includes("maintenance")) return "maintenance";
 
   return "default";
-}
-
-// ==================================================================================
-// 6) PICK MODE (STRICT -> RELAXED -> FALLBACK ROME)
-// ==================================================================================
-
-function pickRelaxed(allCandidates: ScoredFormation[], config: JobProfile) {
-  const relaxedMin = config.relaxed_min_score ?? Math.max(12, config.min_score - 12);
-
-  const relaxed = allCandidates
-    .filter((s) => s.score >= relaxedMin)
-    .sort(sortByScoreThenDistance);
-
-  const cap = config.max_results ?? 60;
-
-  if (relaxed.length === 0) {
-    // dernier recours: top scores (même si bas) pour éviter 0
-    return [...allCandidates].sort(sortByScoreThenDistance).slice(0, Math.min(25, cap));
-  }
-
-  return relaxed.slice(0, cap);
 }
 
 // ==================================================================================
@@ -1005,46 +996,56 @@ Deno.serve(async (req: Request) => {
     const [userLon, userLat] = geoData.features[0].geometry.coordinates;
     const villeRef = geoData.features[0].properties.label;
 
-    // 1) Strict adaptatif
-    const { scoredStrict, appliedRadius, expanded, debug } = await getScoredResultsAdaptive(config, userLat, userLon);
+    // 1) Strict + meilleurs candidats
+    const { strictKept, bestCandidates, appliedRadius, expanded, debug } = await getStrictAndCandidates(config, userLat, userLon);
+
+    const target = Math.max(6, config.target_min_results);
+    const cap = config.max_results ?? 60;
 
     let mode: Mode = "strict";
-    let picked: ScoredFormation[] = scoredStrict;
+    let merged: ScoredFormation[] = strictKept;
 
-    // 2) Si strict=0 => relaxed sur les candidats du dernier rayon
-    if (picked.length === 0) {
-      mode = "relaxed";
-
-      const { results: rawLast } = await fetchLBA(config.romes, userLat, userLon, appliedRadius);
-      const candidates = rawLast
-        .map((r: any) => scoreFormation(r, config, userLat, userLon))
-        .filter(Boolean) as ScoredFormation[];
-
-      const dedupCandidates = dedupSmart(candidates, 3);
-      picked = pickRelaxed(dedupCandidates, config);
+    // 2) Si strict insuffisant => on complète avec relaxed (sur bestCandidates, pas seulement dernier rayon)
+    if (merged.length < target) {
+      const relaxedPicked = pickRelaxed(bestCandidates, config);
+      merged = mergeKeepBest(merged, relaxedPicked);
+      mode = merged.length > 0 ? "strict+relaxed" : "relaxed";
     }
 
-    // 3) Si encore trop peu => fallback ROME (par métier)
-    if (picked.length === 0 || picked.length < Math.min(4, config.target_min_results)) {
+    // 3) Si toujours insuffisant => on complète via fallback ROME (sans écraser)
+    if (merged.length < target) {
       const fallbackRomes = Array.from(new Set([...(config.fallback_romes ?? []), ...config.romes])).filter(Boolean);
 
       if (fallbackRomes.length > 0) {
-        mode = "fallback_rome";
+        // rayon fallback : au minimum rayon actuel ou rayon de base + 150
+        const fbRadius = Math.max(appliedRadius, config.radius_km + 150);
 
-        const { results: rawFB } = await fetchLBA(fallbackRomes, userLat, userLon, Math.max(appliedRadius, config.radius_km + 150));
+        const fetchedFB = await fetchLBA(fallbackRomes, userLat, userLon, fbRadius);
+        const rawFB = fetchedFB.results;
+
         const candidatesFB = rawFB
           .map((r: any) => scoreFormation(r, config, userLat, userLon))
           .filter(Boolean) as ScoredFormation[];
 
-        const dedupFB = dedupSmart(candidatesFB, 3);
-        picked = pickRelaxed(dedupFB, config);
+        const dedupFB = dedupSmart(candidatesFB, 3).sort(sortByScoreThenDistance);
+        const relaxedFB = pickRelaxed(dedupFB, config);
+
+        merged = mergeKeepBest(merged, relaxedFB);
+
+        if (mode === "strict") mode = "fallback_rome";
+        else if (mode === "strict+relaxed") mode = "strict+relaxed+fallback_rome";
+        else mode = "fallback_rome";
       }
     }
+
+    // Dédup final + cap
+    merged = dedupSmart(merged, 3).sort(sortByScoreThenDistance);
+    if (merged.length > cap) merged = merged.slice(0, cap);
 
     // 4) Map -> results frontend
     const niveauFiltre = normalizeNiveauFilter(niveau);
 
-    let results = picked.map((s) => {
+    const mapped = merged.map((s) => {
       const computedNiveau = inferNiveau(s.diplomaLevel, s.title);
       const distRounded = s.distanceKm === null ? 999 : round1(s.distanceKm);
 
@@ -1072,12 +1073,15 @@ Deno.serve(async (req: Request) => {
       };
     });
 
-    // Filtre niveau
+    // 5) Filtre niveau (et count humain)
+    const count_total_avant_filtre = mapped.length;
+
+    let results = mapped;
     if (niveauFiltre !== "all") {
       results = results.filter((r: any) => r.niveau === niveauFiltre);
     }
 
-    // Tri final : score desc puis distance
+    // tri final UI
     results.sort((a: any, b: any) => {
       const sa = a?.match?.score ?? 0;
       const sb = b?.match?.score ?? 0;
@@ -1088,26 +1092,27 @@ Deno.serve(async (req: Request) => {
       return da - db;
     });
 
-    // Cap max_results (sécurité)
-    const cap = config.max_results ?? 60;
-    if (results.length > cap) results = results.slice(0, cap);
-
     return new Response(
       JSON.stringify({
         metier_detecte: config.label,
         ville_reference: villeRef,
         rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`,
         niveau_filtre: niveauFiltre,
+
         mode,
+
+        // ✅ humain : total vs affiché
+        count_total: count_total_avant_filtre,
         count: results.length,
+
         formations: results,
 
-        // debug
         debug: {
           jobKey,
-          raw_count_last: debug.raw_count_last,
-          scored_count_last: debug.scored_count_last,
-          kept_count_strict_last: debug.kept_count_strict_last,
+          ...debug,
+          strict_count: strictKept.length,
+          merged_count_before_level_filter: count_total_avant_filtre,
+          final_count_after_level_filter: results.length,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
