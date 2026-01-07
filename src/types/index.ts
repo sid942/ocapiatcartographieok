@@ -107,6 +107,9 @@ export interface SearchFormationsResponse {
   // ✅ présent dans ton backend
   mode?: SearchMode;
 
+  // ✅ NOUVEAU : total trouvé AVANT filtre niveau (si backend le renvoie)
+  count_total?: number;
+
   count: number;
   niveau_filtre?: NiveauFiltre;
   formations: Formation[];
