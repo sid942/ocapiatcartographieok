@@ -6,14 +6,22 @@ import { SearchForm } from "./components/SearchForm";
 import { FormationList } from "./components/FormationList";
 import { FormationMap, FormationMapRef } from "./components/FormationMap";
 
-import type { Formation, MetierKey, SearchFormationsResponse, NiveauFiltre, SearchMode } from "./types";
+import type {
+  Formation,
+  MetierKey,
+  SearchFormationsResponse,
+  NiveauFiltre,
+  SearchMode,
+} from "./types";
 
 // --- CONFIGURATION SUPABASE (idéalement à déplacer dans src/lib/supabase.ts) ---
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Variables d'environnement Supabase manquantes (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).");
+  throw new Error(
+    "Variables d'environnement Supabase manquantes (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
+  );
 }
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -23,21 +31,38 @@ function normalizeForSearch(s: string) {
   return (s ?? "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, ""); // retire accents
 }
 
 function humanizeMode(mode?: SearchMode) {
   switch (mode) {
     case "strict":
       return { label: "Strict", hint: "Résultats très pertinents uniquement." };
+
     case "relaxed":
-      return { label: "Élargi", hint: "On garde les plus proches quand c’est trop strict." };
+      return {
+        label: "Élargi",
+        hint: "On garde les plus proches quand c’est trop strict.",
+      };
+
     case "fallback_rome":
-      return { label: "Secours ROME", hint: "ROME élargi pour éviter un résultat vide (scoring garde la cohérence)." };
+      return {
+        label: "Secours ROME",
+        hint: "ROME élargi pour éviter un résultat vide (le scoring garde la cohérence).",
+      };
+
     case "strict+relaxed":
-      return { label: "Strict + Élargi", hint: "Strict d’abord, puis élargi pour compléter." };
+      return {
+        label: "Strict + Élargi",
+        hint: "Strict d’abord, puis élargi pour compléter.",
+      };
+
     case "strict+relaxed+fallback_rome":
-      return { label: "Strict + Élargi + Secours ROME", hint: "Tous les filets de sécurité activés." };
+      return {
+        label: "Strict + Élargi + Secours ROME",
+        hint: "Tous les filets de sécurité activés.",
+      };
+
     default:
       return null;
   }
@@ -56,10 +81,10 @@ function App() {
     ville: string;
     rayon: string;
 
-    // ✅ count affiché (après filtre niveau)
+    // count affiché (après filtre niveau) — correspond à api.count
     count: number;
 
-    // ✅ total trouvé (avant filtre niveau) — nouveau
+    // total trouvé avant filtre niveau (si backend le renvoie)
     countTotal?: number;
 
     mode?: SearchMode;
@@ -93,13 +118,18 @@ function App() {
       const results = Array.isArray(api.formations) ? api.formations : [];
       setFormations(results);
 
+      // ✅ on lit count_total de façon safe (même si ton type TS n’est pas encore à jour)
+      const rawAny = data as any;
+      const countTotal =
+        typeof rawAny?.count_total === "number" ? (rawAny.count_total as number) : undefined;
+
       setSearchMeta({
         metier: api.metier_detecte,
         ville: api.ville_reference,
         rayon: api.rayon_applique,
 
         count: typeof api.count === "number" ? api.count : results.length,
-        countTotal: typeof api.count_total === "number" ? api.count_total : undefined,
+        countTotal,
 
         mode: api.mode,
         debug: api.debug,
@@ -107,7 +137,9 @@ function App() {
 
       // Zoom auto sur la première formation géolocalisée
       if (mapRef.current && results.length > 0) {
-        const firstGeo = results.find((f) => typeof f.lat === "number" && typeof f.lon === "number");
+        const firstGeo = results.find(
+          (f) => typeof f.lat === "number" && typeof f.lon === "number"
+        );
         if (firstGeo) {
           setTimeout(() => mapRef.current?.flyToFormation(firstGeo), 300);
         }
@@ -133,9 +165,7 @@ function App() {
     !!searchMeta?.rayon && normalizeForSearch(searchMeta.rayon).includes("elargi");
 
   const modeInfo = humanizeMode(searchMeta?.mode);
-  const isNonStrictMode =
-    searchMeta?.mode &&
-    searchMeta.mode !== "strict";
+  const isNonStrictMode = !!searchMeta?.mode && searchMeta.mode !== "strict";
 
   const emptyStateMessage = (() => {
     const dbg = searchMeta?.debug;
@@ -168,7 +198,9 @@ function App() {
               <h1 className="text-lg font-bold text-[#74114D] leading-tight">
                 Cartographie <span className="text-[#F5A021]">Intelligente</span>
               </h1>
-              <p className="text-xs text-gray-600 mt-1 font-medium">Négoce Agricole • Résultats contextualisés</p>
+              <p className="text-xs text-gray-600 mt-1 font-medium">
+                Négoce Agricole • Résultats contextualisés
+              </p>
             </div>
           </div>
         </div>
@@ -215,7 +247,9 @@ function App() {
               {modeInfo && (
                 <div className="text-[10px] text-gray-500 italic pt-1 border-t border-[#47A152]/20">
                   Mode pertinence : <span className="font-semibold">{modeInfo.label}</span>
-                  {modeInfo.hint ? <span className="block text-gray-500/90 mt-0.5">{modeInfo.hint}</span> : null}
+                  {modeInfo.hint ? (
+                    <span className="block text-gray-500/90 mt-0.5">{modeInfo.hint}</span>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -236,15 +270,19 @@ function App() {
           <div className="px-4 pb-4 animate-in fade-in duration-500">
             <div className="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               {formations.length} formation(s) affichée(s)
-              {typeof searchMeta?.countTotal === "number" && searchMeta.countTotal !== formations.length ? (
-                <span className="normal-case font-normal ml-1 text-gray-400">(sur {searchMeta.countTotal})</span>
+              {typeof searchMeta?.countTotal === "number" &&
+              searchMeta.countTotal !== formations.length ? (
+                <span className="normal-case font-normal ml-1 text-gray-400">
+                  (sur {searchMeta.countTotal})
+                </span>
               ) : null}
             </div>
 
             {/* Si mode non strict, avertissement “humain” */}
             {isNonStrictMode && (
               <div className="mb-3 text-[11px] text-gray-600 bg-yellow-50 border border-yellow-200 rounded-md p-2">
-                On a activé un mode de secours pour éviter un résultat vide. Les premiers résultats restent les plus proches et les plus cohérents.
+                Un mode de secours a été activé pour éviter un résultat vide. Les premiers résultats restent les plus proches
+                et les plus cohérents.
               </div>
             )}
 
