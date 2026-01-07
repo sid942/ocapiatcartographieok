@@ -105,15 +105,65 @@ function splitTitle(intitule: string): { main: string; sub: string | null } {
   return { main: t, sub: null };
 }
 
-function getWhyReasons(f: Formation): string[] {
-  const reasons = (f.match?.reasons ?? [])
+/**
+ * IMPORTANT (anti-honte) :
+ * - On n'affiche JAMAIS au user des raisons "techniques" type ROME, "hors contexte", "prudence", etc.
+ * - On essaie de transformer en raisons humaines.
+ * - Si on n'a rien de propre -> fallback simple.
+ */
+function sanitizeWhyReasons(f: Formation): string[] {
+  const raw = (f.match?.reasons ?? [])
     .map((x) => (x ?? "").toString().trim())
     .filter(Boolean);
 
-  if (reasons.length) return reasons.slice(0, 3);
+  const score = typeof f.match?.score === "number" ? f.match.score : null;
 
-  // fallback propre si rien
-  return ["Résultat pertinent selon votre recherche"];
+  // Transformations "humaines"
+  const toHuman = (r: string): string | null => {
+    const low = r.toLowerCase();
+
+    // On supprime le jargon / les flags "honteux"
+    if (low.includes("rome")) return null;
+    if (low.includes("hors contexte")) return null;
+    if (low.includes("prudence")) return null;
+
+    // On garde / convertit ce qui est propre
+    if (low.includes("contexte metier ok")) return "Correspond au métier sélectionné";
+    if (low.includes("mot(s) clé(s) métier") || low.includes("mot(s) cle(s) metier"))
+      return "Intitulé proche du métier recherché";
+    if (low.includes("synonyme")) return "Proche du métier (synonyme / intitulé équivalent)";
+    if (low.includes("hors rayon initial")) return "Un peu au-delà du rayon initial (élargi automatiquement)";
+    if (low.includes("distance élevée") || low.includes("distance elevee")) return null;
+    if (low.includes("tres eloigne") || low.includes("très éloigné")) return null;
+    if (low.includes("non geolocalise") || low.includes("non géolocalisé")) return "Localisation non disponible (résultat conservé)";
+
+    // Si la raison est déjà clean, on la garde
+    // (par ex si ton backend envoie déjà des textes “propres”)
+    if (r.length >= 4) return r;
+
+    return null;
+  };
+
+  const cleaned = raw
+    .map(toHuman)
+    .filter((x): x is string => Boolean(x))
+    .map((x) => x.replace(/\s+/g, " ").trim());
+
+  // Dédup + limite
+  const uniq: string[] = [];
+  for (const r of cleaned) {
+    if (!uniq.includes(r)) uniq.push(r);
+  }
+
+  // Fallback “humain” si score faible / pas de raisons exploitables
+  if (uniq.length === 0) {
+    if (score !== null && score <= 10) {
+      return ["Résultat proposé pour éviter une liste vide (moins prioritaire)"];
+    }
+    return ["Résultat pertinent selon votre recherche"];
+  }
+
+  return uniq.slice(0, 3);
 }
 
 export function FormationList({ formations, onFormationClick }: FormationListProps) {
@@ -188,7 +238,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
 
           const { main, sub } = splitTitle(formation.intitule);
           const whyOpen = openWhyKey === key;
-          const whyReasons = getWhyReasons(formation);
+          const whyReasons = sanitizeWhyReasons(formation);
 
           return (
             <div
@@ -218,6 +268,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                     </button>
                   </div>
 
+                  {/* Spécialité / parcours en petit */}
                   {sub ? <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{sub}</div> : null}
                 </div>
 
@@ -232,10 +283,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
 
               {/* WHY (toggle) */}
               {whyOpen ? (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  className="mb-2 rounded-md border border-gray-200 bg-white p-2"
-                >
+                <div onClick={(e) => e.stopPropagation()} className="mb-2 rounded-md border border-gray-200 bg-white p-2">
                   <div className="text-[11px] font-bold text-gray-800 mb-1">Pourquoi cette formation ?</div>
                   <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-gray-700">
                     {whyReasons.map((r, i) => (
@@ -270,11 +318,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                   <Award className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
                   <span title="Répertoire National des Certifications Professionnelles">
                     RNCP&nbsp;:{" "}
-                    {rncp !== "Non renseigné" ? (
-                      <span className="font-mono text-gray-700">{rncp}</span>
-                    ) : (
-                      "Non renseigné"
-                    )}
+                    {rncp !== "Non renseigné" ? <span className="font-mono text-gray-700">{rncp}</span> : "Non renseigné"}
                   </span>
                 </div>
 
