@@ -2,14 +2,15 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 /**
  * OCAPIAT - Search Formations (LBA)
- * V3.1 PRO (anti-honte / anti-0 / anti-lointain / anti-hors-sujet)
+ * V3.2 PRO (anti-honte / anti-0 / anti-lointain / anti-hors-sujet)
  *
  * Objectifs :
- * ✅ Anti-0 (jamais vide si possible)
- * ✅ Pas de hors-sujet en haut
+ * ✅ Anti-0 (jamais vide si possible) MAIS sans afficher des résultats honteux
+ * ✅ Pas de hors-sujet en haut (ni en relaxed/fallback)
  * ✅ Ville ambiguë refusée ("Mont", "St", "Saint", etc.)
  * ✅ Strict/Relaxed/Fallback cohérents (rescore réel par phase)
  * ✅ count_total (avant filtre niveau) + count (après filtre)
+ * ✅ raisons UI humaines (pas de "ROME seul", "hors contexte", etc.)
  */
 
 const corsHeaders = {
@@ -102,7 +103,21 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1416", "A1101"],
     fallback_romes: ["N1101", "N1303", "N1302"],
     radius_km: 70,
-    strong_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage", "sechage", "tri", "reception", "expedition", "cooperative", "negoce", "elevateur"],
+    strong_keywords: [
+      "silo",
+      "grain",
+      "grains",
+      "cereales",
+      "collecte",
+      "stockage",
+      "sechage",
+      "tri",
+      "reception",
+      "expedition",
+      "cooperative",
+      "negoce",
+      "elevateur",
+    ],
     synonyms: ["stockage agricole", "collecte cereales", "silo agricole", "collecte de grains"],
     weak_keywords: ["agricole", "logistique", "entrepot", "manutention", "cariste"],
     banned_keywords: ["ciment", "beton"],
@@ -122,7 +137,22 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1101", "N4101"],
     fallback_romes: ["N4102", "N4105", "N1303"],
     radius_km: 120,
-    strong_keywords: ["tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "materiel agricole", "machinisme", "cereales", "recolte", "chauffeur", "conduite", "engins agricoles", "permis ce", "permis c"],
+    strong_keywords: [
+      "tracteur",
+      "benne",
+      "remorque",
+      "moissonneuse",
+      "ensileuse",
+      "materiel agricole",
+      "machinisme",
+      "cereales",
+      "recolte",
+      "chauffeur",
+      "conduite",
+      "engins agricoles",
+      "permis ce",
+      "permis c",
+    ],
     synonyms: ["conducteur tracteur", "conduite d engins agricoles", "transport agricole"],
     weak_keywords: ["transport", "livraison", "route", "logistique"],
     banned_keywords: ["bus", "taxi", "ambulance", "vtc", "tourisme", "voyageurs"],
@@ -142,7 +172,23 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1301", "A1303"],
     fallback_romes: ["N1301", "N1302", "N1303"],
     radius_km: 180,
-    strong_keywords: ["silo", "stockage", "collecte", "cereales", "cooperative", "negoce", "qualite", "reception", "expedition", "sechage", "tri", "stocks", "planning", "responsable", "chef"],
+    strong_keywords: [
+      "silo",
+      "stockage",
+      "collecte",
+      "cereales",
+      "cooperative",
+      "negoce",
+      "qualite",
+      "reception",
+      "expedition",
+      "sechage",
+      "tri",
+      "stocks",
+      "planning",
+      "responsable",
+      "chef",
+    ],
     synonyms: ["chef de silo", "responsable stockage", "gestionnaire silo"],
     weak_keywords: ["management", "pilotage", "logistique", "entrepot", "supply chain"],
     banned_keywords: [],
@@ -162,7 +208,21 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["I1102"],
     fallback_romes: ["I1304", "I1103"],
     radius_km: 120,
-    strong_keywords: ["maintenance", "electromecanique", "mecanique", "hydraulique", "pneumatique", "automatismes", "diagnostic", "depannage", "preventive", "curative", "equipement", "industrie", "production"],
+    strong_keywords: [
+      "maintenance",
+      "electromecanique",
+      "mecanique",
+      "hydraulique",
+      "pneumatique",
+      "automatismes",
+      "diagnostic",
+      "depannage",
+      "preventive",
+      "curative",
+      "equipement",
+      "industrie",
+      "production",
+    ],
     synonyms: ["responsable maintenance", "chef maintenance", "technicien maintenance"],
     weak_keywords: ["site", "atelier", "energie"],
     banned_keywords: ["maintenance informatique", "reseau", "aeronautique", "avion"],
@@ -182,7 +242,19 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["D1407", "D1402"],
     fallback_romes: ["D1401", "D1403"],
     radius_km: 120,
-    strong_keywords: ["semences", "intrants", "engrais", "phytosanitaire", "nutrition animale", "agrofourniture", "cooperative", "negoce agricole", "conseil agricole", "agricole", "agroalimentaire"],
+    strong_keywords: [
+      "semences",
+      "intrants",
+      "engrais",
+      "phytosanitaire",
+      "nutrition animale",
+      "agrofourniture",
+      "cooperative",
+      "negoce agricole",
+      "conseil agricole",
+      "agricole",
+      "agroalimentaire",
+    ],
     synonyms: ["commercial agricole", "conseiller agricole", "technico commercial agricole"],
     weak_keywords: ["commercial", "vente", "negociation", "relation client"],
     banned_keywords: ["immobilier", "assurance", "banque", "cosmetique", "mode", "textile"],
@@ -202,7 +274,20 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["N1301", "N1302"],
     fallback_romes: ["N1303", "N1101"],
     radius_km: 120,
-    strong_keywords: ["logistique", "entrepot", "supply chain", "flux", "stocks", "transport", "planning", "expedition", "reception", "approvisionnement", "gestion des stocks", "wms"],
+    strong_keywords: [
+      "logistique",
+      "entrepot",
+      "supply chain",
+      "flux",
+      "stocks",
+      "transport",
+      "planning",
+      "expedition",
+      "reception",
+      "approvisionnement",
+      "gestion des stocks",
+      "wms",
+    ],
     synonyms: ["responsable entrepot", "chef de quai", "gestionnaire logistique"],
     weak_keywords: ["management", "organisation", "pilotage"],
     banned_keywords: ["transport de personnes", "voyageurs"],
@@ -222,7 +307,20 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["N1101", "N1303"],
     fallback_romes: ["N1302", "N1301"],
     radius_km: 80,
-    strong_keywords: ["cariste", "caces", "chariot", "chariot elevateur", "magasinier", "preparation de commandes", "picking", "manutention", "stock", "entrepot", "quai", "logistique"],
+    strong_keywords: [
+      "cariste",
+      "caces",
+      "chariot",
+      "chariot elevateur",
+      "magasinier",
+      "preparation de commandes",
+      "picking",
+      "manutention",
+      "stock",
+      "entrepot",
+      "quai",
+      "logistique",
+    ],
     synonyms: ["agent magasinier", "operateur logistique", "preparateur de commandes"],
     weak_keywords: ["magasin", "distribution"],
     banned_keywords: ["grue", "btp", "chantier"],
@@ -242,7 +340,22 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H1502", "H1506", "H1503"],
     fallback_romes: ["H1504"],
     radius_km: 120,
-    strong_keywords: ["controle qualite", "qualite", "conformite", "inspection", "haccp", "tracabilite", "laboratoire", "analyse", "prelevement", "normes", "audit", "plan de controle", "agroalimentaire", "alimentaire"],
+    strong_keywords: [
+      "controle qualite",
+      "qualite",
+      "conformite",
+      "inspection",
+      "haccp",
+      "tracabilite",
+      "laboratoire",
+      "analyse",
+      "prelevement",
+      "normes",
+      "audit",
+      "plan de controle",
+      "agroalimentaire",
+      "alimentaire",
+    ],
     synonyms: ["assistant qualite", "technicien qualite", "agent qualite"],
     weak_keywords: ["industrie", "production"],
     banned_keywords: ["automobile", "aeronautique", "pharmaceutique", "cosmetique", "chimie"],
@@ -282,7 +395,22 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H2102"],
     fallback_romes: ["H2101"],
     radius_km: 120,
-    strong_keywords: ["conducteur de ligne", "conduite de ligne", "ligne", "production", "conditionnement", "fabrication", "process", "machine", "reglage", "demarrage", "arret", "hygiene", "agroalimentaire", "alimentaire"],
+    strong_keywords: [
+      "conducteur de ligne",
+      "conduite de ligne",
+      "ligne",
+      "production",
+      "conditionnement",
+      "fabrication",
+      "process",
+      "machine",
+      "reglage",
+      "demarrage",
+      "arret",
+      "hygiene",
+      "agroalimentaire",
+      "alimentaire",
+    ],
     synonyms: ["operateur de production", "pilote de ligne", "conducteur d installation"],
     weak_keywords: ["industrie", "usine"],
     banned_keywords: ["imprimerie", "textile"],
@@ -457,7 +585,6 @@ type ScoredFormation = {
   strongHits: number;
   synHits: number;
 
-  // (utile) pour debug / dédup
   _dedupKey: string;
 };
 
@@ -511,7 +638,7 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   let score = 0;
   const reasons: string[] = [];
 
-  // ROME match
+  // ROME match (utile pour score, mais on ne l'expose pas tel quel en UI)
   const hasRome = Array.isArray(raw?.romes)
     ? raw.romes.some((r: any) => config.romes.includes(r?.code))
     : false;
@@ -543,7 +670,7 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     reasons.push("ROME seul (prudence)");
   }
 
-  // ✅ GARDE-FOU CONTEXTE (par phase)
+  // Contexte métier
   const ctx = config.context_keywords ?? [];
   const ctxHits = ctx.length > 0 ? countHits(fullText, ctx) : 0;
 
@@ -556,6 +683,14 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
       score += Math.min(10, ctxHits * 4);
       reasons.push("contexte métier OK");
     }
+  }
+
+  // ✅ GARDE-FOU ANTI-HORS-SUJET (toutes phases)
+  // Si un métier a un contexte défini, on exige au moins un signal métier.
+  // => ROME seul / hors-contexte n'est JAMAIS affichable.
+  const hasJobSignals = ctxHits > 0 || strongHits > 0 || synHits > 0;
+  if ((config.context_keywords?.length ?? 0) > 0 && !hasJobSignals) {
+    return null;
   }
 
   // Bonus proximité + pénalité distance (anti-honte)
@@ -574,7 +709,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 
     if (dist > soft) {
       const extra = Math.min(30, Math.round((dist - soft) / 30));
-      // en fallback on est un peu moins dur, mais on veut quand même le pousser en bas
       score -= (phase === "fallback" ? 6 : 8) + extra;
       reasons.push("distance élevée");
     }
@@ -586,12 +720,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   } else {
     score -= 10;
     reasons.push("non géolocalisé");
-  }
-
-  // ✅ En STRICT : si contexte absent + aucun signal fort => on jette
-  if (phase === "strict" && (config.context_keywords?.length ?? 0) > 0) {
-    const hasAnyStrongSignal = strongHits > 0 || synHits > 0 || hasRome;
-    if (ctxHits === 0 && !hasAnyStrongSignal) return null;
   }
 
   const id = raw?.id || crypto.randomUUID();
@@ -683,12 +811,25 @@ function mergeKeepBest(base: ScoredFormation[], extra: ScoredFormation[]) {
   return Array.from(map.values()).sort(sortByScoreThenDistance);
 }
 
+/**
+ * ✅ Sélection "anti-honte" :
+ * - On garde les >= minScore si possible
+ * - Sinon on garde un petit pack "limite" mais jamais ridicule
+ * - On n'envoie PAS de score 2 juste parce qu'on veut éviter 0
+ */
 function pickByThreshold(scored: ScoredFormation[], minScore: number, cap: number) {
-  const kept = scored.filter((s) => s.score >= minScore).sort(sortByScoreThenDistance);
+  const sorted = [...scored].sort(sortByScoreThenDistance);
+
+  // Hard floor anti-honte
+  const hardFloor = Math.max(12, minScore - 6);
+
+  const eligible = sorted.filter((s) => s.score >= hardFloor);
+  const kept = eligible.filter((s) => s.score >= minScore);
+
   if (kept.length > 0) return kept.slice(0, cap);
 
-  // anti-0 : si rien passe le seuil, on prend quand même un petit top
-  return [...scored].sort(sortByScoreThenDistance).slice(0, Math.min(25, cap));
+  // anti-0 mais propre : petit top "limite" seulement
+  return eligible.slice(0, Math.min(12, cap));
 }
 
 // ==================================================================================
@@ -701,7 +842,7 @@ async function getStrictAndPoolRaw(
   userLon: number
 ): Promise<{
   strictKept: ScoredFormation[];
-  bestRawPool: any[]; // pool "raw" (LBA) du rayon le plus riche
+  bestRawPool: any[];
   appliedRadius: number;
   expanded: boolean;
   debug: {
@@ -738,7 +879,7 @@ async function getStrictAndPoolRaw(
     raw_count_last = fetched.raw_count;
     last_status = fetched.status;
 
-    // On conserve le rayon qui ramène le plus de données "raw"
+    // Rayon le plus "riche" = pool raw pour relaxed
     if (raw_count_last > bestRawCount) {
       bestRawCount = raw_count_last;
       bestRawPool = raw;
@@ -832,27 +973,15 @@ function detectJobKey(inputMetier: any): string {
 // 7) GEO (anti "Mont", "St", etc.)
 // ==================================================================================
 
-const AMBIGUOUS_CITY_TOKENS = new Set([
-  "mont",
-  "st",
-  "ste",
-  "saint",
-  "sainte",
-  "saints",
-  "s",
-]);
+const AMBIGUOUS_CITY_TOKENS = new Set(["mont", "st", "ste", "saint", "sainte", "saints", "s"]);
 
 function isAmbiguousCityInput(ville: string) {
   const q = ville.trim();
   const c = cleanText(q);
 
-  // trop court
   if (q.length < 4) return true;
-
-  // "Mont", "St", etc.
   if (AMBIGUOUS_CITY_TOKENS.has(c)) return true;
 
-  // un seul mot ambigu : "mont", "st", "saint"
   const parts = c.split(" ").filter(Boolean);
   if (parts.length === 1 && AMBIGUOUS_CITY_TOKENS.has(parts[0])) return true;
 
@@ -982,12 +1111,19 @@ Deno.serve(async (req: Request) => {
     merged = dedupSmart(merged, 3).sort(sortByScoreThenDistance);
     if (merged.length > cap) merged = merged.slice(0, cap);
 
-    // 4) Map -> frontend
+    // 4) Map -> frontend (avec raisons UI propres)
     const niveauFiltre = normalizeNiveauFilter(niveau);
 
     const mapped = merged.map((s) => {
       const computedNiveau = inferNiveau(s.diplomaLevel, s.title);
       const distRounded = s.distanceKm === null ? 999 : round1(s.distanceKm);
+
+      // ✅ raisons UI humaines (on retire tout ce qui fait honte / trop technique)
+      const uiReasons = (Array.isArray(s.reasons) ? s.reasons : [])
+        .map((r) => (r ?? "").toString())
+        .filter((r) => !/prudence|hors contexte|rome seul|non geolocalis/i.test(r))
+        .map((r) => r.replace(/ROME compatible/i, "Correspond au métier recherché"))
+        .slice(0, 3);
 
       return {
         id: s.id,
@@ -1004,7 +1140,10 @@ Deno.serve(async (req: Request) => {
         site_web: s.url,
         url: s.url,
         niveau: computedNiveau,
-        match: { score: s.score, reasons: s.reasons.slice(0, 3) },
+        match: {
+          score: s.score,
+          reasons: uiReasons.length ? uiReasons : ["Résultat pertinent selon votre recherche"],
+        },
       };
     });
 
