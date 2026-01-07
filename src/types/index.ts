@@ -1,16 +1,20 @@
 // ===============================
 // MÉTIERS (affichage + clé stable)
 // ===============================
-
+// IMPORTANT : les keys DOIVENT correspondre aux clés JOB_CONFIG backend
 export const METIERS = [
   { key: "technico", label: "Technico-commercial" },
   { key: "silo", label: "Agent de silo" },
   { key: "chauffeur", label: "Chauffeur agricole" },
   { key: "responsable_silo", label: "Responsable silo" },
-  { key: "logistique", label: "Responsable logistique" },
-  { key: "magasinier", label: "Magasinier / cariste" },
-  { key: "services_tech", label: "Responsable services techniques" },
-  { key: "qualite", label: "Contrôleur qualité" },
+
+  { key: "responsable_logistique", label: "Responsable logistique" },
+  { key: "magasinier_cariste", label: "Magasinier / cariste" },
+
+  // Dans le backend refait : la clé "maintenance" a le label "Responsable services techniques"
+  { key: "maintenance", label: "Responsable services techniques" },
+
+  { key: "controleur_qualite", label: "Contrôleur qualité" },
   { key: "agreeur", label: "Agréeur" },
   { key: "conducteur_ligne", label: "Conducteur de ligne" },
   { key: "technicien_culture", label: "Technicien culture" },
@@ -20,51 +24,58 @@ export const METIERS = [
 export type MetierKey = typeof METIERS[number]["key"];
 export type MetierLabel = typeof METIERS[number]["label"];
 
-// Pour compat si ton UI manipule encore un simple string
+// Compat éventuelle si des composants manipulent encore un label
 export type Metier = MetierLabel;
 
 // ===============================
 // FORMATIONS
 // ===============================
 
+export type Niveau = "3" | "4" | "5" | "6" | "N/A";
+export type NiveauFiltre = "3" | "4" | "5" | "6" | "all";
+
+export interface FormationMatch {
+  score?: number;
+  reasons?: string[];
+}
+
 export interface Formation {
+  // Back renvoie un id stable (uuid / id LBA)
   id?: string;
 
   intitule: string;
   organisme: string;
-  ville: string;
+  ville: string | null;
 
   // Coordonnées (optionnelles si non géolocalisé)
   lat?: number;
   lon?: number;
 
-  // Toujours présent : si non géolocalisé, le backend peut mettre 999
+  /**
+   * Toujours présent.
+   * Convention : 999 = non géolocalisé / distance inconnue
+   */
   distance_km: number;
 
-  // Lien vers la formation (LBA ou autre)
-  url?: string | null;
+  // Niveau normalisé
+  niveau: Niveau | string;
 
-  // Niveau normalisé : '3' | '4' | '5' | '6' | 'N/A'
-  niveau: string;
+  // Liens
+  url?: string | null;       // lien LBA éventuel
+  site_web?: string | null;  // utilisé par ton UI (affiche "Voir le site")
 
-  // Tags affichage (métier + distance + etc.)
+  // Affichage
   tags?: string[];
 
-  // ===============================
-  // Champs d’enrichissement (optionnels)
-  // ===============================
-  rncp?: string;            // si dispo plus tard
-  modalite?: string;        // "Initial" | "Alternance" | etc.
-  alternance?: string;      // "Oui" | "Non"
-  categorie?: string;       // "Diplôme" | "Certification" | etc.
-  site_web?: string | null;
+  // Enrichissements (optionnels, car LBA ne les fournit pas toujours)
+  rncp?: string;             // "Non renseigné" par défaut côté backend
+  modalite?: string;         // "Non renseigné" par défaut
+  alternance?: "Oui" | "Non" | string; // "Non" par défaut
+  categorie?: string;        // "Diplôme / Titre" par défaut
   region?: string;
 
-  // Prévu pour ton futur "?" explicatif
-  match?: {
-    score?: number;
-    reasons?: string[];
-  };
+  // Futur "?" explicatif (scoring)
+  match?: FormationMatch;
 }
 
 // ===============================
@@ -77,18 +88,14 @@ export interface SearchFormationsResponse {
   rayon_applique: string;
   count: number;
   formations: Formation[];
-
-  // Optionnel : si tu veux l'afficher ou le logger
-  niveau_filtre?: "3" | "4" | "5" | "6" | "all";
+  niveau_filtre?: NiveauFiltre;
 }
 
-// ===============================
 // Ancien nom (compat si ton code importe encore PerplexityResponse)
-// ===============================
 export type PerplexityResponse = SearchFormationsResponse;
 
 // ===============================
-// Géocodage (si tu l'utilises)
+// Géocodage (si utilisé)
 // ===============================
 
 export interface NominatimResult {
