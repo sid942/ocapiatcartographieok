@@ -45,10 +45,9 @@ export interface Formation {
   intitule: string;
   organisme: string;
 
-  // ✅ IMPORTANT : le backend renvoie toujours une ville (s.city ?? villeRef)
+  // ✅ le backend renvoie toujours une ville (s.city ?? villeRef)
   ville: string;
 
-  // Coordonnées (optionnelles si non géolocalisé)
   lat?: number;
   lon?: number;
 
@@ -58,12 +57,12 @@ export interface Formation {
    */
   distance_km: number;
 
-  // ✅ Niveau normalisé (le backend renvoie "3|4|5|6|N/A")
+  // ✅ Niveau normalisé
   niveau: Niveau;
 
   // Liens
-  url?: string | null;       // lien LBA éventuel
-  site_web?: string | null;  // utilisé par ton UI (affiche "Voir le site")
+  url?: string | null;
+  site_web?: string | null;
 
   // Affichage
   tags?: string[];
@@ -75,7 +74,7 @@ export interface Formation {
   categorie?: string;
   region?: string;
 
-  // Scoring (futur "?" ou debug)
+  // Scoring (debug / futur "?" explicatif)
   match?: FormationMatch;
 }
 
@@ -83,14 +82,27 @@ export interface Formation {
 // RÉPONSE API (Edge Function)
 // ===============================
 
-export type SearchMode = "strict" | "relaxed";
+// ✅ nouveaux modes renvoyés par le backend PRO+
+export type SearchMode =
+  | "strict"
+  | "strict+relaxed"
+  | "strict+relaxed+fallback_rome"
+  | "relaxed"
+  | "fallback_rome";
 
 export interface SearchDebugInfo {
   jobKey?: string;
+
   raw_count_last?: number;
   scored_count_last?: number;
   kept_count_strict_last?: number;
-  candidates_last_radius?: number;
+
+  best_candidates_count?: number;
+  last_status?: number;
+
+  strict_count?: number;
+  merged_count_before_level_filter?: number;
+  final_count_after_level_filter?: number;
 }
 
 export interface SearchFormationsResponse {
@@ -98,14 +110,18 @@ export interface SearchFormationsResponse {
   ville_reference: string;
   rayon_applique: string;
 
-  // ✅ présent dans ton nouveau backend
+  // ✅ présent dans le backend
   mode?: SearchMode;
 
+  // ✅ total avant filtre niveau (nouveau)
+  count_total?: number;
+
+  // ✅ affiché (après filtre niveau)
   count: number;
+
   niveau_filtre?: NiveauFiltre;
   formations: Formation[];
 
-  // ✅ présent dans ton nouveau backend (tu peux l’ignorer côté UI)
   debug?: SearchDebugInfo;
 }
 
