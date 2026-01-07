@@ -15,7 +15,7 @@ import {
   FileText,
   Briefcase,
   ExternalLink,
-  CircleHelp,
+  HelpCircle,
 } from "lucide-react";
 import type { Formation } from "../types";
 import "leaflet/dist/leaflet.css";
@@ -287,7 +287,7 @@ function FormationMarker({
                   title="Pourquoi cette formation ?"
                   aria-label="Pourquoi cette formation ?"
                 >
-                  <CircleHelp className="h-4 w-4 text-gray-500" />
+                  <HelpCircle className="h-4 w-4 text-gray-500" />
                 </button>
               </div>
 

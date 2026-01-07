@@ -6,7 +6,7 @@ import {
   Award,
   FileText,
   Briefcase,
-  CircleHelp,
+  HelpCircle,
 } from "lucide-react";
 import type { Formation } from "../types";
 
@@ -264,7 +264,7 @@ export function FormationList({ formations, onFormationClick }: FormationListPro
                       title="Pourquoi cette formation ?"
                       aria-label="Pourquoi cette formation ?"
                     >
-                      <CircleHelp className="h-4 w-4 text-gray-500" />
+                      <HelpCircle className="h-4 w-4 text-gray-500" />
                     </button>
                   </div>
 
