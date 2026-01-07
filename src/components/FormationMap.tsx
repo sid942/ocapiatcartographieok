@@ -20,13 +20,18 @@ function normalizeNiveau(n: string | undefined | null): "3" | "4" | "5" | "6" | 
   return "N/A";
 }
 
+function formationKey(f: Formation, idx: number) {
+  if (f.id) return f.id;
+  return `${f.intitule}|${f.organisme}|${f.ville ?? ""}|${idx}`;
+}
+
 const createCustomIcon = (niveau: "3" | "4" | "5" | "6" | "N/A") => {
   const colors: Record<string, string> = {
     "3": "#74114D",
     "4": "#F5A021",
     "5": "#47A152",
     "6": "#47A152",
-    "N/A": "#6B7280", // gris
+    "N/A": "#6B7280",
   };
 
   const color = colors[niveau] ?? colors["N/A"];
@@ -63,16 +68,15 @@ const getLevelColor = (niveau: "3" | "4" | "5" | "6" | "N/A") => {
   }
 };
 
-function formationKey(f: Formation, idx: number) {
-  if (f.id) return f.id;
-  return `${f.intitule}|${f.organisme}|${f.ville}|${idx}`;
+function round1(n: number) {
+  return Math.round(n * 10) / 10;
 }
 
 function MapBounds({ formations }: { formations: Formation[] }) {
   const map = useMap();
 
   useEffect(() => {
-    if (formations.length === 0) return;
+    if (!formations.length) return;
 
     const bounds = L.latLngBounds(
       formations.map((f) => [f.lat as number, f.lon as number] as [number, number])
@@ -86,14 +90,15 @@ function MapBounds({ formations }: { formations: Formation[] }) {
   return null;
 }
 
-function MapController({ selectedFormation }: { selectedFormation: Formation | null }) {
+function MapController({ selected }: { selected: Formation | null }) {
   const map = useMap();
 
   useEffect(() => {
-    if (selectedFormation && typeof selectedFormation.lat === "number" && typeof selectedFormation.lon === "number") {
-      map.flyTo([selectedFormation.lat, selectedFormation.lon], 12, { duration: 1.5 });
-    }
-  }, [selectedFormation, map]);
+    if (!selected) return;
+    if (typeof selected.lat !== "number" || typeof selected.lon !== "number") return;
+
+    map.flyTo([selected.lat, selected.lon], 12, { duration: 1.5 });
+  }, [selected, map]);
 
   return null;
 }
@@ -120,6 +125,11 @@ function FormationMarker({
   const rncp = formation.rncp ?? "Non renseigné";
   const categorie = formation.categorie ?? "Diplôme / Titre";
   const alternance = formation.alternance ?? "Non";
+
+  const villeLabel = formation.ville ?? "Ville non renseignée";
+
+  const distOk = typeof formation.distance_km === "number" && formation.distance_km < 900;
+  const distLabel = distOk ? `${round1(formation.distance_km)} km` : null;
 
   return (
     <Marker
@@ -152,10 +162,10 @@ function FormationMarker({
             <div className="flex items-start gap-2">
               <MapPin className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
               <div className="flex items-center gap-2">
-                <span>{formation.ville}</span>
-                {typeof formation.distance_km === "number" && formation.distance_km < 900 && (
+                <span>{villeLabel}</span>
+                {distLabel && (
                   <span className="bg-gray-200 text-gray-700 px-1.5 rounded text-[10px] font-semibold">
-                    {formation.distance_km} km
+                    {distLabel}
                   </span>
                 )}
               </div>
@@ -207,7 +217,7 @@ function FormationMarker({
 }
 
 export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(({ formations, onFormationClick }, ref) => {
-  const [selectedFormation, setSelectedFormation] = useState<Formation | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const validFormations = useMemo(
     () => formations.filter((f) => typeof f.lat === "number" && typeof f.lon === "number"),
@@ -216,8 +226,25 @@ export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(({ fo
 
   const center: [number, number] = [46.603354, 1.888334];
 
+  const selectedFormation = useMemo(() => {
+    if (!selectedKey) return null;
+    const idx = validFormations.findIndex((f, i) => formationKey(f, i) === selectedKey);
+    return idx >= 0 ? validFormations[idx] : null;
+  }, [selectedKey, validFormations]);
+
   useImperativeHandle(ref, () => ({
-    flyToFormation: (formation: Formation) => setSelectedFormation(formation),
+    flyToFormation: (formation: Formation) => {
+      // Ne sélectionne que si géolocalisé (sinon aucun effet)
+      if (typeof formation.lat !== "number" || typeof formation.lon !== "number") return;
+
+      // Retrouve sa clé dans la liste courante pour rester stable
+      const idx = validFormations.findIndex((f, i) => {
+        // prioritaire: id
+        if (formation.id && f.id && formation.id === f.id) return true;
+        return formationKey(f, i) === formationKey(formation, i);
+      });
+      if (idx >= 0) setSelectedKey(formationKey(validFormations[idx], idx));
+    },
   }));
 
   return (
@@ -228,20 +255,19 @@ export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(({ fo
       />
 
       {validFormations.length > 0 && <MapBounds formations={validFormations} />}
-      <MapController selectedFormation={selectedFormation} />
+      <MapController selected={selectedFormation} />
 
-      {validFormations.map((formation, index) => (
-        <FormationMarker
-          key={formationKey(formation, index)}
-          formation={formation}
-          isSelected={
-            selectedFormation?.intitule === formation.intitule &&
-            selectedFormation?.organisme === formation.organisme &&
-            selectedFormation?.ville === formation.ville
-          }
-          onFormationClick={onFormationClick}
-        />
-      ))}
+      {validFormations.map((formation, index) => {
+        const key = formationKey(formation, index);
+        return (
+          <FormationMarker
+            key={key}
+            formation={formation}
+            isSelected={selectedKey === key}
+            onFormationClick={onFormationClick}
+          />
+        );
+      })}
     </MapContainer>
   );
 });
