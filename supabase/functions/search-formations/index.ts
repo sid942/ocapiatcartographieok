@@ -2,14 +2,13 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 /**
  * OCAPIAT - Search Formations (LBA)
- * V3.0 PRO (anti-honte / anti-0 / anti-lointain / anti-hors-sujet)
+ * V3.1 PRO (anti-honte / anti-0 / anti-lointain / anti-hors-sujet)
  *
  * Objectifs :
- * ✅ Zéro résultat évité (anti-0)
- * ✅ Mais PAS de hors-sujet en haut de liste
- * ✅ Ville ambiguë refusée ("Mont", "St", etc.)
- * ✅ Géocodage plus fiable
- * ✅ Règles strict/relaxed/fallback cohérentes pour TOUS les métiers
+ * ✅ Anti-0 (jamais vide si possible)
+ * ✅ Pas de hors-sujet en haut
+ * ✅ Ville ambiguë refusée ("Mont", "St", "Saint", etc.)
+ * ✅ Strict/Relaxed/Fallback cohérents (rescore réel par phase)
  * ✅ count_total (avant filtre niveau) + count (après filtre)
  */
 
@@ -24,13 +23,7 @@ const corsHeaders = {
 // ==================================================================================
 
 type NiveauFiltre = "3" | "4" | "5" | "6" | "all";
-type Mode =
-  | "strict"
-  | "strict+relaxed"
-  | "strict+relaxed+fallback_rome"
-  | "relaxed"
-  | "fallback_rome";
-
+type Mode = "strict" | "strict+relaxed" | "strict+relaxed+fallback_rome" | "relaxed" | "fallback_rome";
 type Phase = "strict" | "relaxed" | "fallback";
 
 interface JobProfile {
@@ -54,22 +47,10 @@ interface JobProfile {
   target_min_results: number;
   max_extra_radius_km: number;
 
-  // score relaxed (si absent, calcul auto)
   relaxed_min_score?: number;
-
-  // cap global résultats
   max_results?: number;
 
-  /**
-   * Limite "humaine" pour éviter la honte :
-   * - au-delà, on pénalise très fort (mais on n’interdit pas, anti-0)
-   */
   soft_distance_cap_km?: number;
-
-  /**
-   * Distance max absolue de confort (au-delà = très rare, sauf fallback)
-   * (si absent => soft cap + 250)
-   */
   hard_distance_cap_km?: number;
 }
 
@@ -121,37 +102,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1416", "A1101"],
     fallback_romes: ["N1101", "N1303", "N1302"],
     radius_km: 70,
-
-    strong_keywords: [
-      "silo",
-      "grain",
-      "grains",
-      "cereales",
-      "collecte",
-      "stockage",
-      "sechage",
-      "tri",
-      "reception",
-      "expedition",
-      "cooperative",
-      "negoce",
-      "elevateur",
-    ],
+    strong_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage", "sechage", "tri", "reception", "expedition", "cooperative", "negoce", "elevateur"],
     synonyms: ["stockage agricole", "collecte cereales", "silo agricole", "collecte de grains"],
     weak_keywords: ["agricole", "logistique", "entrepot", "manutention", "cariste"],
-
     banned_keywords: ["ciment", "beton"],
     banned_phrases: ["silo a ciment", "silo beton", "systemes de surete", "surete", "securite incendie"],
-
-    // garde-fou CONTEXTE : un agent de silo sans "silo/collecte/cereales" => hors sujet
     context_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage", "sechage", "tri"],
-
     min_score: 36,
     relaxed_min_score: 22,
     target_min_results: 8,
     max_extra_radius_km: 220,
     max_results: 60,
-
     soft_distance_cap_km: 120,
     hard_distance_cap_km: 420,
   },
@@ -161,39 +122,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1101", "N4101"],
     fallback_romes: ["N4102", "N4105", "N1303"],
     radius_km: 120,
-
-    strong_keywords: [
-      "tracteur",
-      "benne",
-      "remorque",
-      "moissonneuse",
-      "ensileuse",
-      "materiel agricole",
-      "machinisme",
-      "cereales",
-      "recolte",
-      "chauffeur",
-      "conduite",
-      "engins agricoles",
-      "permis ce",
-      "permis c",
-    ],
+    strong_keywords: ["tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "materiel agricole", "machinisme", "cereales", "recolte", "chauffeur", "conduite", "engins agricoles", "permis ce", "permis c"],
     synonyms: ["conducteur tracteur", "conduite d engins agricoles", "transport agricole"],
     weak_keywords: ["transport", "livraison", "route", "logistique"],
-
-    // On évite "transport voyageurs"
     banned_keywords: ["bus", "taxi", "ambulance", "vtc", "tourisme", "voyageurs"],
     banned_phrases: ["transport de personnes", "chauffeur de bus"],
-
-    // garde-fou contexte : si c’est juste “transport routier marchandises” sans agricole -> hors sujet en strict
     context_keywords: ["agricole", "tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "cereales", "recolte", "engins"],
-
     min_score: 34,
     relaxed_min_score: 20,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 60,
-
     soft_distance_cap_km: 180,
     hard_distance_cap_km: 550,
   },
@@ -203,38 +142,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1301", "A1303"],
     fallback_romes: ["N1301", "N1302", "N1303"],
     radius_km: 180,
-
-    strong_keywords: [
-      "silo",
-      "stockage",
-      "collecte",
-      "cereales",
-      "cooperative",
-      "negoce",
-      "qualite",
-      "reception",
-      "expedition",
-      "sechage",
-      "tri",
-      "stocks",
-      "planning",
-      "responsable",
-      "chef",
-    ],
+    strong_keywords: ["silo", "stockage", "collecte", "cereales", "cooperative", "negoce", "qualite", "reception", "expedition", "sechage", "tri", "stocks", "planning", "responsable", "chef"],
     synonyms: ["chef de silo", "responsable stockage", "gestionnaire silo"],
     weak_keywords: ["management", "pilotage", "logistique", "entrepot", "supply chain"],
-
     banned_keywords: [],
     banned_phrases: ["systemes de surete", "surete", "securite incendie"],
-
     context_keywords: ["silo", "cereales", "collecte", "stockage", "sechage", "tri", "reception", "expedition"],
-
     min_score: 36,
     relaxed_min_score: 22,
     target_min_results: 6,
     max_extra_radius_km: 320,
     max_results: 50,
-
     soft_distance_cap_km: 250,
     hard_distance_cap_km: 650,
   },
@@ -244,37 +162,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["I1102"],
     fallback_romes: ["I1304", "I1103"],
     radius_km: 120,
-
-    strong_keywords: [
-      "maintenance",
-      "electromecanique",
-      "mecanique",
-      "hydraulique",
-      "pneumatique",
-      "automatismes",
-      "diagnostic",
-      "depannage",
-      "preventive",
-      "curative",
-      "equipement",
-      "industrie",
-      "production",
-    ],
+    strong_keywords: ["maintenance", "electromecanique", "mecanique", "hydraulique", "pneumatique", "automatismes", "diagnostic", "depannage", "preventive", "curative", "equipement", "industrie", "production"],
     synonyms: ["responsable maintenance", "chef maintenance", "technicien maintenance"],
     weak_keywords: ["site", "atelier", "energie"],
-
     banned_keywords: ["maintenance informatique", "reseau", "aeronautique", "avion"],
     banned_phrases: [],
-
-    // ici le contexte est "maintenance industrielle"
     context_keywords: ["maintenance", "mecanique", "electro", "automatismes", "depannage", "preventive", "curative", "industrie"],
-
     min_score: 32,
     relaxed_min_score: 20,
     target_min_results: 8,
     max_extra_radius_km: 280,
     max_results: 60,
-
     soft_distance_cap_km: 180,
     hard_distance_cap_km: 600,
   },
@@ -284,35 +182,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["D1407", "D1402"],
     fallback_romes: ["D1401", "D1403"],
     radius_km: 120,
-
-    strong_keywords: [
-      "semences",
-      "intrants",
-      "engrais",
-      "phytosanitaire",
-      "nutrition animale",
-      "agrofourniture",
-      "cooperative",
-      "negoce agricole",
-      "conseil agricole",
-      "agricole",
-      "agroalimentaire",
-    ],
+    strong_keywords: ["semences", "intrants", "engrais", "phytosanitaire", "nutrition animale", "agrofourniture", "cooperative", "negoce agricole", "conseil agricole", "agricole", "agroalimentaire"],
     synonyms: ["commercial agricole", "conseiller agricole", "technico commercial agricole"],
     weak_keywords: ["commercial", "vente", "negociation", "relation client"],
-
     banned_keywords: ["immobilier", "assurance", "banque", "cosmetique", "mode", "textile"],
     banned_phrases: [],
-
-    // garde-fou : on accepte des spécialités (vin, boisson) si c’est bien du techno-commercial
     context_keywords: ["commercial", "technico", "vente", "negociation", "relation client", "agricole", "agroalimentaire", "agrofourniture"],
-
     min_score: 30,
     relaxed_min_score: 18,
     target_min_results: 10,
     max_extra_radius_km: 320,
     max_results: 60,
-
     soft_distance_cap_km: 220,
     hard_distance_cap_km: 650,
   },
@@ -322,35 +202,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["N1301", "N1302"],
     fallback_romes: ["N1303", "N1101"],
     radius_km: 120,
-
-    strong_keywords: [
-      "logistique",
-      "entrepot",
-      "supply chain",
-      "flux",
-      "stocks",
-      "transport",
-      "planning",
-      "expedition",
-      "reception",
-      "approvisionnement",
-      "gestion des stocks",
-      "wms",
-    ],
+    strong_keywords: ["logistique", "entrepot", "supply chain", "flux", "stocks", "transport", "planning", "expedition", "reception", "approvisionnement", "gestion des stocks", "wms"],
     synonyms: ["responsable entrepot", "chef de quai", "gestionnaire logistique"],
     weak_keywords: ["management", "organisation", "pilotage"],
-
     banned_keywords: ["transport de personnes", "voyageurs"],
     banned_phrases: ["chauffeur de bus", "transport urbain"],
-
     context_keywords: ["logistique", "entrepot", "stocks", "flux", "transport", "expedition", "reception", "approvisionnement"],
-
     min_score: 28,
     relaxed_min_score: 16,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 80,
-
     soft_distance_cap_km: 200,
     hard_distance_cap_km: 600,
   },
@@ -360,35 +222,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["N1101", "N1303"],
     fallback_romes: ["N1302", "N1301"],
     radius_km: 80,
-
-    strong_keywords: [
-      "cariste",
-      "caces",
-      "chariot",
-      "chariot elevateur",
-      "magasinier",
-      "preparation de commandes",
-      "picking",
-      "manutention",
-      "stock",
-      "entrepot",
-      "quai",
-      "logistique",
-    ],
+    strong_keywords: ["cariste", "caces", "chariot", "chariot elevateur", "magasinier", "preparation de commandes", "picking", "manutention", "stock", "entrepot", "quai", "logistique"],
     synonyms: ["agent magasinier", "operateur logistique", "preparateur de commandes"],
     weak_keywords: ["magasin", "distribution"],
-
     banned_keywords: ["grue", "btp", "chantier"],
     banned_phrases: [],
-
     context_keywords: ["cariste", "caces", "magasinier", "entrepot", "stock", "preparation", "manutention", "logistique"],
-
     min_score: 26,
     relaxed_min_score: 14,
     target_min_results: 12,
     max_extra_radius_km: 220,
     max_results: 120,
-
     soft_distance_cap_km: 140,
     hard_distance_cap_km: 500,
   },
@@ -398,37 +242,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H1502", "H1506", "H1503"],
     fallback_romes: ["H1504"],
     radius_km: 120,
-
-    strong_keywords: [
-      "controle qualite",
-      "qualite",
-      "conformite",
-      "inspection",
-      "haccp",
-      "tracabilite",
-      "laboratoire",
-      "analyse",
-      "prelevement",
-      "normes",
-      "audit",
-      "plan de controle",
-      "agroalimentaire",
-      "alimentaire",
-    ],
+    strong_keywords: ["controle qualite", "qualite", "conformite", "inspection", "haccp", "tracabilite", "laboratoire", "analyse", "prelevement", "normes", "audit", "plan de controle", "agroalimentaire", "alimentaire"],
     synonyms: ["assistant qualite", "technicien qualite", "agent qualite"],
     weak_keywords: ["industrie", "production"],
-
     banned_keywords: ["automobile", "aeronautique", "pharmaceutique", "cosmetique", "chimie"],
     banned_phrases: [],
-
     context_keywords: ["qualite", "controle", "conformite", "audit", "haccp", "tracabilite", "laboratoire", "analyse", "alimentaire", "agroalimentaire"],
-
     min_score: 28,
     relaxed_min_score: 16,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 80,
-
     soft_distance_cap_km: 200,
     hard_distance_cap_km: 650,
   },
@@ -438,37 +262,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H1503", "N1303"],
     fallback_romes: ["H1502", "N1101"],
     radius_km: 150,
-
-    strong_keywords: [
-      "agreeur",
-      "agreage",
-      "fruits",
-      "legumes",
-      "produits frais",
-      "reception",
-      "tri",
-      "calibrage",
-      "lots",
-      "tracabilite",
-      "controle qualite",
-      "qualite",
-      "frais",
-    ],
+    strong_keywords: ["agreeur", "agreage", "fruits", "legumes", "produits frais", "reception", "tri", "calibrage", "lots", "tracabilite", "controle qualite", "qualite", "frais"],
     synonyms: ["agreeur fruits et legumes", "controle reception", "qualite alimentaire"],
     weak_keywords: ["qualite", "logistique", "entrepot"],
-
     banned_keywords: ["pharmaceutique", "cosmetique", "chimie", "biotech", "industries pharmaceutiques"],
     banned_phrases: [],
-
-    // garde-fou fort : si pas fruits/légumes/frais/agréage => hors contexte en strict
     context_keywords: ["agreeur", "agreage", "fruits", "legumes", "produits frais", "calibrage", "frais", "reception", "tri"],
-
     min_score: 28,
     relaxed_min_score: 16,
     target_min_results: 8,
     max_extra_radius_km: 320,
     max_results: 60,
-
     soft_distance_cap_km: 250,
     hard_distance_cap_km: 700,
   },
@@ -478,37 +282,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H2102"],
     fallback_romes: ["H2101"],
     radius_km: 120,
-
-    strong_keywords: [
-      "conducteur de ligne",
-      "conduite de ligne",
-      "ligne",
-      "production",
-      "conditionnement",
-      "fabrication",
-      "process",
-      "machine",
-      "reglage",
-      "demarrage",
-      "arret",
-      "hygiene",
-      "agroalimentaire",
-      "alimentaire",
-    ],
+    strong_keywords: ["conducteur de ligne", "conduite de ligne", "ligne", "production", "conditionnement", "fabrication", "process", "machine", "reglage", "demarrage", "arret", "hygiene", "agroalimentaire", "alimentaire"],
     synonyms: ["operateur de production", "pilote de ligne", "conducteur d installation"],
     weak_keywords: ["industrie", "usine"],
-
     banned_keywords: ["imprimerie", "textile"],
     banned_phrases: [],
-
     context_keywords: ["ligne", "production", "conditionnement", "reglage", "fabrication", "process", "machine", "agroalimentaire", "alimentaire"],
-
     min_score: 28,
     relaxed_min_score: 16,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 80,
-
     soft_distance_cap_km: 220,
     hard_distance_cap_km: 650,
   },
@@ -518,37 +302,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1301"],
     fallback_romes: ["A1416", "A1203"],
     radius_km: 180,
-
-    strong_keywords: [
-      "technicien",
-      "culture",
-      "maraichage",
-      "grandes cultures",
-      "itineraire technique",
-      "agronomie",
-      "sol",
-      "irrigation",
-      "fertilisation",
-      "phyto",
-      "diagnostic",
-      "conseil",
-      "suivi de parcelles",
-      "agricole",
-    ],
+    strong_keywords: ["technicien", "culture", "maraichage", "grandes cultures", "itineraire technique", "agronomie", "sol", "irrigation", "fertilisation", "phyto", "diagnostic", "conseil", "suivi de parcelles", "agricole"],
     synonyms: ["technicien agricole", "technicien cultural", "conseiller technique"],
     weak_keywords: ["environnement", "terrain"],
-
     banned_keywords: ["informatique", "reseau"],
     banned_phrases: [],
-
     context_keywords: ["culture", "agronomie", "maraichage", "grandes cultures", "parcelles", "irrigation", "fertilisation", "phyto"],
-
     min_score: 26,
     relaxed_min_score: 16,
     target_min_results: 6,
     max_extra_radius_km: 380,
     max_results: 60,
-
     soft_distance_cap_km: 300,
     hard_distance_cap_km: 850,
   },
@@ -558,32 +322,17 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["D1402"],
     fallback_romes: ["D1401", "D1407"],
     radius_km: 200,
-
-    strong_keywords: [
-      "export",
-      "international",
-      "import export",
-      "douane",
-      "incoterms",
-      "commerce international",
-      "anglais",
-      "negociation internationale",
-      "business international",
-    ],
+    strong_keywords: ["export", "international", "import export", "douane", "incoterms", "commerce international", "anglais", "negociation internationale", "business international"],
     synonyms: ["assistant import export", "responsable export", "charge d affaires export"],
     weak_keywords: ["commercial", "vente", "grands comptes", "developpement commercial"],
-
     banned_keywords: ["immobilier", "assurance", "banque"],
     banned_phrases: [],
-
     context_keywords: ["export", "international", "import", "douane", "incoterms", "commerce international", "business international"],
-
     min_score: 26,
     relaxed_min_score: 16,
     target_min_results: 8,
     max_extra_radius_km: 480,
     max_results: 60,
-
     soft_distance_cap_km: 320,
     hard_distance_cap_km: 950,
   },
@@ -593,20 +342,16 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1416"],
     fallback_romes: ["N1303", "N1101"],
     radius_km: 80,
-
     strong_keywords: [],
     synonyms: [],
     weak_keywords: [],
-
     banned_keywords: [],
     banned_phrases: [],
-
     min_score: 18,
     relaxed_min_score: 12,
     target_min_results: 8,
     max_extra_radius_km: 220,
     max_results: 80,
-
     soft_distance_cap_km: 180,
     hard_distance_cap_km: 600,
   },
@@ -636,7 +381,7 @@ function escapeRegExp(s: string): string {
 
 function includesWord(text: string, word: string): boolean {
   const w = cleanText(word);
-  if (!w || w.length < 3) return false;
+  if (!w || w.length < 2) return false;
   const re = new RegExp(`\\b${escapeRegExp(w)}\\b`, "i");
   return re.test(text);
 }
@@ -675,13 +420,15 @@ function inferNiveau(diplomaLevel: any, title: string): string {
 
   const t = cleanText(title);
 
-  if (includesWord(t, "cap") || includesPhrase(t, "capa")) return "3";
-  if (includesPhrase(t, "bep")) return "3";
-  if (includesPhrase(t, "brevet professionnel") || includesPhrase(t, "bp ")) return "4";
+  if (includesPhrase(t, "capa") || includesWord(t, "cap")) return "3";
+  if (includesWord(t, "bep")) return "3";
+
+  if (includesPhrase(t, "brevet professionnel") || includesWord(t, "bp")) return "4";
   if (includesPhrase(t, "bac pro") || includesPhrase(t, "baccalaureat professionnel")) return "4";
-  if (includesWord(t, "bts") || includesWord(t, "btsa")) return "5";
-  if (includesWord(t, "but") || includesWord(t, "dut") || includesWord(t, "licence")) return "6";
-  if (includesWord(t, "bachelor")) return "6";
+
+  if (includesWord(t, "btsa") || includesWord(t, "bts")) return "5";
+
+  if (includesWord(t, "but") || includesWord(t, "dut") || includesWord(t, "licence") || includesWord(t, "bachelor")) return "6";
 
   return "N/A";
 }
@@ -706,10 +453,12 @@ type ScoredFormation = {
   score: number;
   reasons: string[];
 
-  // utile pour debug/tri
   ctxHits: number;
   strongHits: number;
   synHits: number;
+
+  // (utile) pour debug / dédup
+  _dedupKey: string;
 };
 
 const BANNED_GLOBAL = BANNED_GLOBAL_RAW.map(cleanText).filter(Boolean);
@@ -727,6 +476,10 @@ function countHits(fullText: string, list: string[]): number {
     if (includesPhrase(fullText, kw) || includesWord(fullText, kw)) hits++;
   }
   return hits;
+}
+
+function makeDedupKey(title: string, company: string, city: string | null) {
+  return `${cleanText(title)}|${cleanText(company)}|${cleanText(city || "")}`;
 }
 
 function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: number, phase: Phase): ScoredFormation | null {
@@ -796,9 +549,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 
   if (ctx.length > 0) {
     if (ctxHits === 0) {
-      // En STRICT : on bloque quasi tout hors-contexte
-      // En RELAXED : pénalité forte
-      // En FALLBACK : pénalité modérée (anti-0)
       const penalty = phase === "strict" ? 28 : phase === "relaxed" ? 18 : 10;
       score -= penalty;
       reasons.push("hors contexte métier");
@@ -808,31 +558,28 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     }
   }
 
-  // Bonus proximité / pénalité distance
+  // Bonus proximité + pénalité distance (anti-honte)
   if (dist !== null) {
     if (dist <= 10) score += 8;
     else if (dist <= 25) score += 5;
     else if (dist <= 50) score += 2;
 
-    // si au-delà rayon initial, petite pénalité
     if (dist > config.radius_km) {
       score -= 6;
       reasons.push("hors rayon initial");
     }
 
-    // pénalités “anti-honte”
     const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
     const hard = config.hard_distance_cap_km ?? (soft + 250);
 
     if (dist > soft) {
-      // plus c'est loin, plus on descend dans la liste
-      const extra = Math.min(30, Math.round((dist - soft) / 30)); // +1 tous les 30 km
-      score -= 8 + extra;
+      const extra = Math.min(30, Math.round((dist - soft) / 30));
+      // en fallback on est un peu moins dur, mais on veut quand même le pousser en bas
+      score -= (phase === "fallback" ? 6 : 8) + extra;
       reasons.push("distance élevée");
     }
 
     if (dist > hard) {
-      // au-delà hard cap : chute forte (sauf fallback, où c’est “moins violent”)
       score -= phase === "fallback" ? 18 : 28;
       reasons.push("très éloigné");
     }
@@ -841,14 +588,16 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     reasons.push("non géolocalisé");
   }
 
-  // ✅ Garde-fou final : en STRICT, si contexte absent + aucun signal fort => on jette
+  // ✅ En STRICT : si contexte absent + aucun signal fort => on jette
   if (phase === "strict" && (config.context_keywords?.length ?? 0) > 0) {
     const hasAnyStrongSignal = strongHits > 0 || synHits > 0 || hasRome;
     if (ctxHits === 0 && !hasAnyStrongSignal) return null;
   }
 
+  const id = raw?.id || crypto.randomUUID();
+
   return {
-    id: raw?.id || crypto.randomUUID(),
+    id,
     title,
     companyName,
     city,
@@ -863,6 +612,7 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     ctxHits,
     strongHits,
     synHits,
+    _dedupKey: makeDedupKey(title, companyName, city),
   };
 }
 
@@ -886,14 +636,6 @@ async function fetchLBA(romes: string[], lat: number, lon: number, radiusKm: num
   return { results, raw_count: results.length, status: 200 };
 }
 
-function dedupKey(s: ScoredFormation): string {
-  return `${cleanText(s.title)}|${cleanText(s.companyName)}|${cleanText(s.city || "")}`;
-}
-
-function titleKey(s: ScoredFormation): string {
-  return cleanText(s.title);
-}
-
 function sortByScoreThenDistance(a: ScoredFormation, b: ScoredFormation) {
   if (b.score !== a.score) return b.score - a.score;
   const da = a.distanceKm ?? 9999;
@@ -904,7 +646,7 @@ function sortByScoreThenDistance(a: ScoredFormation, b: ScoredFormation) {
 function dedupSmart(items: ScoredFormation[], maxPerTitle = 3) {
   const seen = new Set<string>();
   const unique = items.filter((s) => {
-    const k = dedupKey(s);
+    const k = s._dedupKey;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -912,7 +654,7 @@ function dedupSmart(items: ScoredFormation[], maxPerTitle = 3) {
 
   const counts = new Map<string, number>();
   const limited = unique.filter((s) => {
-    const tk = titleKey(s);
+    const tk = cleanText(s.title);
     const c = (counts.get(tk) ?? 0) + 1;
     counts.set(tk, c);
     return c <= maxPerTitle;
@@ -925,7 +667,7 @@ function mergeKeepBest(base: ScoredFormation[], extra: ScoredFormation[]) {
   const map = new Map<string, ScoredFormation>();
 
   const keep = (s: ScoredFormation) => {
-    const k = dedupKey(s);
+    const k = s._dedupKey;
     const existing = map.get(k);
     if (!existing) {
       map.set(k, s);
@@ -941,40 +683,32 @@ function mergeKeepBest(base: ScoredFormation[], extra: ScoredFormation[]) {
   return Array.from(map.values()).sort(sortByScoreThenDistance);
 }
 
-function pickRelaxed(allCandidates: ScoredFormation[], config: JobProfile) {
-  const relaxedMin = config.relaxed_min_score ?? Math.max(12, config.min_score - 12);
+function pickByThreshold(scored: ScoredFormation[], minScore: number, cap: number) {
+  const kept = scored.filter((s) => s.score >= minScore).sort(sortByScoreThenDistance);
+  if (kept.length > 0) return kept.slice(0, cap);
 
-  const relaxed = allCandidates
-    .filter((s) => s.score >= relaxedMin)
-    .sort(sortByScoreThenDistance);
-
-  const cap = config.max_results ?? 60;
-
-  if (relaxed.length === 0) {
-    return [...allCandidates].sort(sortByScoreThenDistance).slice(0, Math.min(25, cap));
-  }
-
-  return relaxed.slice(0, cap);
+  // anti-0 : si rien passe le seuil, on prend quand même un petit top
+  return [...scored].sort(sortByScoreThenDistance).slice(0, Math.min(25, cap));
 }
 
 // ==================================================================================
-// 5) STRICT ADAPTATIF + CANDIDATS
+// 5) STRICT ADAPTATIF + POOL RAW POUR RESCORE
 // ==================================================================================
 
-async function getStrictAndCandidates(
+async function getStrictAndPoolRaw(
   config: JobProfile,
   userLat: number,
   userLon: number
 ): Promise<{
   strictKept: ScoredFormation[];
-  bestCandidates: ScoredFormation[];
+  bestRawPool: any[]; // pool "raw" (LBA) du rayon le plus riche
   appliedRadius: number;
   expanded: boolean;
   debug: {
     raw_count_last: number;
     scored_count_last: number;
     kept_count_strict_last: number;
-    best_candidates_count: number;
+    best_pool_raw_count: number;
     last_status?: number;
   };
 }> {
@@ -991,7 +725,7 @@ async function getStrictAndCandidates(
 
   let finalStrict: ScoredFormation[] = [];
 
-  let bestCandidates: ScoredFormation[] = [];
+  let bestRawPool: any[] = [];
   let bestRawCount = -1;
 
   for (const extra of steps) {
@@ -1000,20 +734,21 @@ async function getStrictAndCandidates(
 
     const fetched = await fetchLBA(config.romes, userLat, userLon, appliedRadius);
     const raw = fetched.results;
+
     raw_count_last = fetched.raw_count;
     last_status = fetched.status;
+
+    // On conserve le rayon qui ramène le plus de données "raw"
+    if (raw_count_last > bestRawCount) {
+      bestRawCount = raw_count_last;
+      bestRawPool = raw;
+    }
 
     const scoredAll = raw
       .map((r: any) => scoreFormation(r, config, userLat, userLon, "strict"))
       .filter(Boolean) as ScoredFormation[];
 
     scored_count_last = scoredAll.length;
-
-    // meilleur rayon “candidats”
-    if (raw_count_last > bestRawCount) {
-      bestRawCount = raw_count_last;
-      bestCandidates = dedupSmart(scoredAll, 3).sort(sortByScoreThenDistance);
-    }
 
     const keptStrict = scoredAll.filter((s) => s.score >= config.min_score);
     kept_count_strict_last = keptStrict.length;
@@ -1027,14 +762,14 @@ async function getStrictAndCandidates(
 
   return {
     strictKept: finalStrict,
-    bestCandidates,
+    bestRawPool,
     appliedRadius,
     expanded,
     debug: {
       raw_count_last,
       scored_count_last,
       kept_count_strict_last,
-      best_candidates_count: bestCandidates.length,
+      best_pool_raw_count: bestRawPool.length,
       last_status,
     },
   };
@@ -1094,8 +829,35 @@ function detectJobKey(inputMetier: any): string {
 }
 
 // ==================================================================================
-// 7) GEO (anti "Mont")
+// 7) GEO (anti "Mont", "St", etc.)
 // ==================================================================================
+
+const AMBIGUOUS_CITY_TOKENS = new Set([
+  "mont",
+  "st",
+  "ste",
+  "saint",
+  "sainte",
+  "saints",
+  "s",
+]);
+
+function isAmbiguousCityInput(ville: string) {
+  const q = ville.trim();
+  const c = cleanText(q);
+
+  // trop court
+  if (q.length < 4) return true;
+
+  // "Mont", "St", etc.
+  if (AMBIGUOUS_CITY_TOKENS.has(c)) return true;
+
+  // un seul mot ambigu : "mont", "st", "saint"
+  const parts = c.split(" ").filter(Boolean);
+  if (parts.length === 1 && AMBIGUOUS_CITY_TOKENS.has(parts[0])) return true;
+
+  return false;
+}
 
 async function geocodeCityOrThrow(ville: string): Promise<{
   userLat: number;
@@ -1106,15 +868,14 @@ async function geocodeCityOrThrow(ville: string): Promise<{
 }> {
   const q = ville.trim();
 
-  // Anti-villes ambiguës / trop courtes
-  if (q.length < 4) {
-    throw new Error("Ville trop courte. Merci d’indiquer le nom complet (ex: Montauban, Montpellier, Montélimar).");
+  if (isAmbiguousCityInput(q)) {
+    throw new Error("Ville ambiguë. Merci d’indiquer le nom complet (ex: Montauban, Montpellier, Montélimar, Saint-Étienne…).");
   }
 
-  const tries: Array<{ type: string; url: string }> = [
-    { type: "municipality", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=municipality` },
-    { type: "city", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=city` },
-    { type: "fallback", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1` },
+  const tries: Array<{ type: string; url: string; minScore: number }> = [
+    { type: "municipality", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=municipality`, minScore: 0.45 },
+    { type: "city", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=city`, minScore: 0.45 },
+    { type: "fallback", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`, minScore: 0.55 },
   ];
 
   for (const t of tries) {
@@ -1127,12 +888,12 @@ async function geocodeCityOrThrow(ville: string): Promise<{
     const props = f?.properties;
 
     if (!Array.isArray(coords) || coords.length < 2) continue;
+
     const [lon, lat] = coords;
     const label = props?.label || q;
     const score = typeof props?.score === "number" ? props.score : 0;
 
-    // Seuil qualité : en dessous, la ville est probablement mal reconnue
-    if (score < 0.40 && t.type !== "fallback") continue;
+    if (score < t.minScore) continue;
 
     return {
       userLat: lat,
@@ -1143,7 +904,7 @@ async function geocodeCityOrThrow(ville: string): Promise<{
     };
   }
 
-  throw new Error("Ville inconnue ou ambiguë. Merci de préciser (ex: Montélimar, Mont-de-Marsan, Montauban…).");
+  throw new Error("Ville inconnue ou trop ambiguë. Merci de préciser (ex: Montélimar, Mont-de-Marsan, Montauban…).");
 }
 
 // ==================================================================================
@@ -1164,37 +925,35 @@ Deno.serve(async (req: Request) => {
     const jobKey = detectJobKey(metier);
     const config = JOB_CONFIG[jobKey] || JOB_CONFIG.default;
 
-    // GEO robuste (anti “Mont”)
+    // GEO robuste
     const geo = await geocodeCityOrThrow(ville);
     const userLat = geo.userLat;
     const userLon = geo.userLon;
     const villeRef = geo.villeRef;
 
-    // 1) Strict + candidats
-    const { strictKept, bestCandidates, appliedRadius, expanded, debug } = await getStrictAndCandidates(config, userLat, userLon);
-
     const target = Math.max(6, config.target_min_results);
     const cap = config.max_results ?? 60;
+
+    // 1) STRICT adaptatif + pool raw (pour rescoring relaxed)
+    const { strictKept, bestRawPool, appliedRadius, expanded, debug } = await getStrictAndPoolRaw(config, userLat, userLon);
 
     let mode: Mode = "strict";
     let merged: ScoredFormation[] = strictKept;
 
-    // 2) Relaxed (sur candidats) si strict insuffisant
+    // 2) RELAXED (RESCORE RÉEL sur raw pool)
     if (merged.length < target) {
-      const relaxedCandidates = bestCandidates
-        .map((s) => s) // déjà scorés strict; on rescore en relaxed pour être plus juste
-        .map((s) => {
-          // On reconstruit un “raw minimal” impossible ici, donc on garde la base mais on permet une sélection plus large via seuil.
-          // => pickRelaxed gère déjà la logique "relaxed_min_score"
-          return s;
-        });
+      const relaxedScored = bestRawPool
+        .map((r: any) => scoreFormation(r, config, userLat, userLon, "relaxed"))
+        .filter(Boolean) as ScoredFormation[];
 
-      const relaxedPicked = pickRelaxed(relaxedCandidates, config);
+      const relaxedMin = config.relaxed_min_score ?? Math.max(12, config.min_score - 12);
+      const relaxedPicked = pickByThreshold(dedupSmart(relaxedScored, 3), relaxedMin, cap);
+
       merged = mergeKeepBest(merged, relaxedPicked);
       mode = merged.length > 0 ? "strict+relaxed" : "relaxed";
     }
 
-    // 3) Fallback ROME si toujours insuffisant
+    // 3) FALLBACK ROME (RESCORE fallback)
     if (merged.length < target) {
       const fallbackRomes = Array.from(new Set([...(config.fallback_romes ?? []), ...config.romes])).filter(Boolean);
 
@@ -1204,14 +963,14 @@ Deno.serve(async (req: Request) => {
         const fetchedFB = await fetchLBA(fallbackRomes, userLat, userLon, fbRadius);
         const rawFB = fetchedFB.results;
 
-        const candidatesFB = rawFB
+        const scoredFB = rawFB
           .map((r: any) => scoreFormation(r, config, userLat, userLon, "fallback"))
           .filter(Boolean) as ScoredFormation[];
 
-        const dedupFB = dedupSmart(candidatesFB, 3).sort(sortByScoreThenDistance);
-        const relaxedFB = pickRelaxed(dedupFB, config);
+        const relaxedMin = config.relaxed_min_score ?? Math.max(12, config.min_score - 12);
+        const pickedFB = pickByThreshold(dedupSmart(scoredFB, 3), relaxedMin, cap);
 
-        merged = mergeKeepBest(merged, relaxedFB);
+        merged = mergeKeepBest(merged, pickedFB);
 
         if (mode === "strict") mode = "fallback_rome";
         else if (mode === "strict+relaxed") mode = "strict+relaxed+fallback_rome";
@@ -1235,20 +994,15 @@ Deno.serve(async (req: Request) => {
         intitule: s.title,
         organisme: s.companyName,
         ville: s.city ?? villeRef,
-
         lat: s.lat ?? undefined,
         lon: s.lon ?? undefined,
-
         distance_km: distRounded,
-
         rncp: "Non renseigné",
         modalite: "Non renseigné",
         alternance: "Non",
         categorie: "Diplôme / Titre",
-
         site_web: s.url,
         url: s.url,
-
         niveau: computedNiveau,
         match: { score: s.score, reasons: s.reasons.slice(0, 3) },
       };
@@ -1262,7 +1016,7 @@ Deno.serve(async (req: Request) => {
       results = results.filter((r: any) => r.niveau === niveauFiltre);
     }
 
-    // tri final UI (score puis distance)
+    // Tri final UI (score puis distance)
     results.sort((a: any, b: any) => {
       const sa = a?.match?.score ?? 0;
       const sb = b?.match?.score ?? 0;
@@ -1273,14 +1027,12 @@ Deno.serve(async (req: Request) => {
       return da - db;
     });
 
-    // indicateur “résultats loin”
+    // Warnings
+    const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
     const maxDist = results.reduce((m: number, r: any) => {
       const d = typeof r?.distance_km === "number" ? r.distance_km : 999;
       return Math.max(m, d);
     }, 0);
-
-    const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
-    const farResults = maxDist > soft;
 
     return new Response(
       JSON.stringify({
@@ -1288,22 +1040,15 @@ Deno.serve(async (req: Request) => {
         ville_reference: villeRef,
         rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`,
         niveau_filtre: niveauFiltre,
-
         mode,
-
-        // ✅ humain : total vs affiché
         count_total: count_total_avant_filtre,
         count: results.length,
-
         formations: results,
-
-        // ✅ infos optionnelles (UI peut ignorer)
         warnings: {
-          far_results: farResults,
+          far_results: maxDist > soft,
           geocode_score: geo.geoScore,
           geocode_type: geo.geoTypeTried,
         },
-
         debug: {
           jobKey,
           ...debug,
