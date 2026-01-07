@@ -1,4 +1,11 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import {
@@ -80,44 +87,113 @@ function round1(n: number) {
   return Math.round(n * 10) / 10;
 }
 
+/**
+ * Objectif :
+ * - Titre principal propre
+ * - Spé en petit dessous (sans la mettre en avant)
+ */
 function splitTitle(intitule: string): { main: string; sub: string | null } {
   const t = (intitule ?? "").toString().trim();
   if (!t) return { main: "Formation", sub: null };
 
+  // 1) " : " => domaine : spé
   const colonIdx = t.indexOf(" : ");
   if (colonIdx > 4 && colonIdx < t.length - 4) {
-    return { main: t.slice(0, colonIdx).trim(), sub: t.slice(colonIdx + 3).trim() || null };
+    return {
+      main: t.slice(0, colonIdx).trim(),
+      sub: t.slice(colonIdx + 3).trim() || null,
+    };
   }
 
+  // 2) Parenthèses + reste
   const openIdx = t.indexOf("(");
   const closeIdx = t.indexOf(")");
   if (openIdx >= 0 && closeIdx > openIdx) {
     const before = t.slice(0, openIdx).trim();
     const inside = t.slice(openIdx + 1, closeIdx).trim();
     const after = t.slice(closeIdx + 1).trim();
+
     const subParts = [inside, after].filter(Boolean);
     const sub = subParts.length ? subParts.join(" — ") : null;
+
     if (before && before.length >= 6) return { main: before, sub };
   }
 
+  // 3) SPE / SPECIALITE / OPTION / PARCOURS
   const patterns = [" SPE ", " SPECIALITE ", " SPÉCIALITÉ ", " OPTION ", " PARCOURS "];
   const upper = t.toUpperCase();
   for (const p of patterns) {
     const idx = upper.indexOf(p);
     if (idx > 6 && idx < t.length - 6) {
-      return { main: t.slice(0, idx).trim(), sub: t.slice(idx).trim() || null };
+      return {
+        main: t.slice(0, idx).trim(),
+        sub: t.slice(idx).trim() || null,
+      };
     }
   }
 
   return { main: t, sub: null };
 }
 
-function getWhyReasons(f: Formation): string[] {
-  const reasons = (f.match?.reasons ?? [])
+/**
+ * IMPORTANT (anti-honte):
+ * - On n'affiche jamais "ROME", "hors contexte", "prudence", etc.
+ * - On renvoie des raisons humaines.
+ */
+function sanitizeWhyReasons(f: Formation): string[] {
+  const raw = (f.match?.reasons ?? [])
     .map((x) => (x ?? "").toString().trim())
     .filter(Boolean);
 
-  return reasons.length ? reasons.slice(0, 3) : ["Résultat pertinent selon votre recherche"];
+  const score = typeof f.match?.score === "number" ? f.match.score : null;
+
+  const toHuman = (r: string): string | null => {
+    const low = r.toLowerCase();
+
+    // Suppression jargon / flags
+    if (low.includes("rome")) return null;
+    if (low.includes("hors contexte")) return null;
+    if (low.includes("prudence")) return null;
+
+    // Conversions propres
+    if (low.includes("contexte metier ok")) return "Correspond au métier sélectionné";
+    if (low.includes("mot(s) clé(s) métier") || low.includes("mot(s) cle(s) metier"))
+      return "Intitulé proche du métier recherché";
+    if (low.includes("synonyme")) return "Proche du métier (synonyme / intitulé équivalent)";
+    if (low.includes("hors rayon initial"))
+      return "Un peu au-delà du rayon initial (élargi automatiquement)";
+    if (low.includes("non geolocalise") || low.includes("non géolocalisé"))
+      return "Localisation non disponible (résultat conservé)";
+
+    // Distance élevée / très éloigné => on cache (inutile et “honteux”)
+    if (low.includes("distance élevée") || low.includes("distance elevee")) return null;
+    if (low.includes("très éloigné") || low.includes("tres eloigne")) return null;
+
+    // Si backend envoie déjà du clean, on garde
+    if (r.length >= 4) return r;
+
+    return null;
+  };
+
+  const cleaned = raw
+    .map(toHuman)
+    .filter((x): x is string => Boolean(x))
+    .map((x) => x.replace(/\s+/g, " ").trim());
+
+  // Dédup + limite
+  const uniq: string[] = [];
+  for (const r of cleaned) {
+    if (!uniq.includes(r)) uniq.push(r);
+  }
+
+  if (uniq.length === 0) {
+    if (score !== null && score <= 10) {
+      return ["Résultat proposé pour éviter une liste vide (moins prioritaire)"];
+    }
+    return ["Résultat pertinent selon votre recherche"];
+  }
+
+  return uniq.slice(0, 3);
 }
 
 function MapBounds({ formations }: { formations: Formation[] }) {
@@ -126,7 +202,9 @@ function MapBounds({ formations }: { formations: Formation[] }) {
   useEffect(() => {
     if (!formations.length) return;
 
-    const bounds = L.latLngBounds(formations.map((f) => [f.lat as number, f.lon as number] as [number, number]));
+    const bounds = L.latLngBounds(
+      formations.map((f) => [f.lat as number, f.lon as number] as [number, number])
+    );
     if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50] });
   }, [formations, map]);
 
@@ -165,7 +243,15 @@ function FormationMarker({
 
   const rncp = formation.rncp ?? "Non renseigné";
   const categorie = formation.categorie ?? "Diplôme / Titre";
-  const alternance = formation.alternance ?? "Non";
+
+  // Même règle que FormationList (si modalité contient alternance etc.)
+  const alternance =
+    formation.alternance === "Oui" || formation.alternance === "Non"
+      ? formation.alternance
+      : (formation.modalite ?? "").toLowerCase().includes("apprentissage") ||
+        (formation.modalite ?? "").toLowerCase().includes("alternance")
+      ? "Oui"
+      : "Non";
 
   const villeLabel = formation.ville ?? "Ville non renseignée";
 
@@ -173,7 +259,7 @@ function FormationMarker({
   const distLabel = distOk ? `${round1(formation.distance_km)} km` : null;
 
   const { main, sub } = splitTitle(formation.intitule);
-  const whyReasons = getWhyReasons(formation);
+  const whyReasons = sanitizeWhyReasons(formation);
 
   return (
     <Marker
@@ -184,10 +270,12 @@ function FormationMarker({
     >
       <Popup>
         <div className="p-3 min-w-[280px] max-w-[340px]">
+          {/* Header */}
           <div className="flex items-start justify-between gap-2 mb-2">
             <div className="flex-1 min-w-0">
               <div className="flex items-start gap-2">
                 <h3 className="font-bold text-gray-900 text-sm leading-tight">{main}</h3>
+
                 <button
                   type="button"
                   onClick={(e) => {
@@ -203,6 +291,7 @@ function FormationMarker({
                 </button>
               </div>
 
+              {/* Spé / parcours en petit */}
               {sub ? <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{sub}</div> : null}
             </div>
 
@@ -215,8 +304,15 @@ function FormationMarker({
             </span>
           </div>
 
+          {/* WHY */}
           {whyOpen ? (
-            <div className="mb-2 rounded-md border border-gray-200 bg-white p-2">
+            <div
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              className="mb-2 rounded-md border border-gray-200 bg-white p-2"
+            >
               <div className="text-[11px] font-bold text-gray-800 mb-1">Pourquoi cette formation ?</div>
               <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-gray-700">
                 {whyReasons.map((r, i) => (
@@ -226,6 +322,7 @@ function FormationMarker({
             </div>
           ) : null}
 
+          {/* Détails */}
           <div className="space-y-1.5 text-xs text-gray-600">
             <div className="flex items-start gap-2">
               <Building2 className="h-3.5 w-3.5 mt-0.5 text-gray-400 flex-shrink-0" />
@@ -237,7 +334,9 @@ function FormationMarker({
               <div className="flex items-center gap-2">
                 <span>{villeLabel}</span>
                 {distLabel ? (
-                  <span className="bg-gray-200 text-gray-700 px-1.5 rounded text-[10px] font-semibold">{distLabel}</span>
+                  <span className="bg-gray-200 text-gray-700 px-1.5 rounded text-[10px] font-semibold">
+                    {distLabel}
+                  </span>
                 ) : null}
               </div>
             </div>
@@ -270,6 +369,7 @@ function FormationMarker({
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[#F5A021] hover:text-[#e69116] hover:underline font-semibold"
+                  onClick={(e) => e.stopPropagation()}
                 >
                   Voir le site de l&apos;école
                 </a>
@@ -287,60 +387,63 @@ function FormationMarker({
   );
 }
 
-export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(({ formations, onFormationClick }, ref) => {
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+export const FormationMap = forwardRef<FormationMapRef, FormationMapProps>(
+  ({ formations, onFormationClick }, ref) => {
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  const validFormations = useMemo(
-    () => formations.filter((f) => typeof f.lat === "number" && typeof f.lon === "number"),
-    [formations]
-  );
+    const validFormations = useMemo(
+      () => formations.filter((f) => typeof f.lat === "number" && typeof f.lon === "number"),
+      [formations]
+    );
 
-  const center: [number, number] = [46.603354, 1.888334];
+    const center: [number, number] = [46.603354, 1.888334];
 
-  const selectedFormation = useMemo(() => {
-    if (!selectedKey) return null;
-    const idx = validFormations.findIndex((f, i) => formationKey(f, i) === selectedKey);
-    return idx >= 0 ? validFormations[idx] : null;
-  }, [selectedKey, validFormations]);
+    const selectedFormation = useMemo(() => {
+      if (!selectedKey) return null;
+      const idx = validFormations.findIndex((f, i) => formationKey(f, i) === selectedKey);
+      return idx >= 0 ? validFormations[idx] : null;
+    }, [selectedKey, validFormations]);
 
-  useImperativeHandle(ref, () => ({
-    flyToFormation: (formation: Formation) => {
-      if (typeof formation.lat !== "number" || typeof formation.lon !== "number") return;
+    useImperativeHandle(ref, () => ({
+      flyToFormation: (formation: Formation) => {
+        if (typeof formation.lat !== "number" || typeof formation.lon !== "number") return;
 
-      const idx = validFormations.findIndex((f, i) => {
-        if (formation.id && f.id && formation.id === f.id) return true;
-        return formationKey(f, i) === formationKey(formation, i);
-      });
-      if (idx >= 0) setSelectedKey(formationKey(validFormations[idx], idx));
-    },
-  }));
+        const idx = validFormations.findIndex((f, i) => {
+          if (formation.id && f.id && formation.id === f.id) return true;
+          return formationKey(f, i) === formationKey(formation, i);
+        });
 
-  return (
-    <MapContainer center={center} zoom={6} className="h-full w-full" style={{ height: "100vh" }}>
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+        if (idx >= 0) setSelectedKey(formationKey(validFormations[idx], idx));
+      },
+    }));
 
-      {validFormations.length > 0 && <MapBounds formations={validFormations} />}
-      <MapController selected={selectedFormation} />
+    return (
+      <MapContainer center={center} zoom={6} className="h-full w-full" style={{ height: "100vh" }}>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
 
-      {validFormations.map((formation, index) => {
-        const key = formationKey(formation, index);
-        return (
-          <FormationMarker
-            key={key}
-            formation={formation}
-            isSelected={selectedKey === key}
-            onFormationClick={(f) => {
-              setSelectedKey(key);
-              onFormationClick?.(f);
-            }}
-          />
-        );
-      })}
-    </MapContainer>
-  );
-});
+        {validFormations.length > 0 && <MapBounds formations={validFormations} />}
+        <MapController selected={selectedFormation} />
+
+        {validFormations.map((formation, index) => {
+          const key = formationKey(formation, index);
+          return (
+            <FormationMarker
+              key={key}
+              formation={formation}
+              isSelected={selectedKey === key}
+              onFormationClick={(f) => {
+                setSelectedKey(key);
+                onFormationClick?.(f);
+              }}
+            />
+          );
+        })}
+      </MapContainer>
+    );
+  }
+);
 
 FormationMap.displayName = "FormationMap";
