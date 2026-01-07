@@ -1,19 +1,27 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  fetchPerplexityFormations,
+  shouldEnrichWithPerplexity,
+  mergeFormationsWithoutDuplicates,
+  type PerplexityFormationInput,
+} from "./perplexity_enrich.ts";
 
 /**
  * OCAPIAT - Search Formations (LBA)
- * V3.2 PRO (anti-honte / anti-0 / anti-lointain / anti-hors-sujet)
+ * V3.3 PRO + Perplexity Enrichment
  *
- * ✅ Anti-0 (on essaie toujours d’en trouver)
- * ✅ MAIS on refuse les “hontes” (chevaux / routier pur / hors sujet total)
+ * ✅ Anti-0 (on essaie toujours d'en trouver)
+ * ✅ MAIS on refuse les "hontes" (chevaux / routier pur / hors sujet total)
  * ✅ Ville ambiguë refusée ("Mont", "St", "Saint", etc.)
  * ✅ Strict/Relaxed/Fallback cohérents (RESCORE réel par phase)
  * ✅ Raisons "Pourquoi ?" humaines (pas de jargon ROME)
+ * ✅ Enrichissement Perplexity invisible si < 10 résultats ou distance élevée
  *
  * Corrections demandées :
  * 1) Anti-honte : en relaxed/fallback, on NE sort plus de score ridicule (ex: 2) juste pour remplir.
  *    -> seuil ABSOLU de pertinence, sinon on renvoie un résultat vide + warning propre.
- * 2) Chauffeur Agricole : on évite routier marchandises “pur” + on bannit chevaux/attelage.
+ * 2) Chauffeur Agricole : on évite routier marchandises "pur" + on bannit chevaux/attelage.
+ * 3) Perplexity : complément invisible avec 2 URLs vérifiées, pas de doublons.
  */
 
 const corsHeaders = {
@@ -66,8 +74,8 @@ interface JobProfile {
 
 /**
  * ✅ Seuil ABSOLU anti-honte :
- * En dessous, c’est trop bancal (genre score=2 => “ROME seul + hors contexte”).
- * Donc : même en fallback, on ne l’affiche pas.
+ * En dessous, c'est trop bancal (genre score=2 => "ROME seul + hors contexte").
+ * Donc : même en fallback, on ne l'affiche pas.
  */
 const ABSOLUTE_MIN_SCORE = 8;
 
@@ -443,7 +451,7 @@ function cleanText(text: string | null | undefined): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[’']/g, " ")
+    .replace(/['']/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -596,7 +604,7 @@ function buildUserReasons(args: {
     }
   }
 
-  // Fallback de sécurité : au moins une raison “safe”
+  // Fallback de sécurité : au moins une raison "safe"
   if (reasons.length === 0) reasons.push("Résultat pertinent");
 
   return reasons.slice(0, MAX_WHY_REASONS);
@@ -736,7 +744,7 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   }
 
   // ✅ STRICT : si contexte absent + aucun signal fort => on jette (anti hors-sujet en haut)
-  // NB: on ne considère PAS hasRome comme “signal fort” (sinon on retombe dans le problème ROME seul)
+  // NB: on ne considère PAS hasRome comme "signal fort" (sinon on retombe dans le problème ROME seul)
   if (phase === "strict" && (config.context_keywords?.length ?? 0) > 0) {
     const hasStrongSignal = strongHits > 0 || synHits > 0;
     if (ctxHits === 0 && !hasStrongSignal) return null;
@@ -1019,7 +1027,7 @@ async function geocodeCityOrThrow(ville: string): Promise<{
   const q = ville.trim();
 
   if (isAmbiguousCityInput(q)) {
-    throw new Error("Ville ambiguë. Merci d’indiquer le nom complet (ex: Montauban, Montpellier, Montélimar, Saint-Étienne…).");
+    throw new Error("Ville ambiguë. Merci d'indiquer le nom complet (ex: Montauban, Montpellier, Montélimar, Saint-Étienne…).");
   }
 
   const tries: Array<{ type: string; url: string; minScore: number }> = [
@@ -1160,10 +1168,36 @@ Deno.serve(async (req: Request) => {
       };
     });
 
-    // 5) Filtre niveau + compteurs
-    const count_total_avant_filtre = mapped.length;
+    // 5) PERPLEXITY ENRICHMENT (fallback invisible si nécessaire)
+    let perplexityUsed = false;
+    let allFormations = mapped;
 
-    let results = mapped;
+    if (shouldEnrichWithPerplexity(mapped, { min_results: 10, max_distance: 150 })) {
+      try {
+        const perplexityInput: PerplexityFormationInput = {
+          metierLabel: config.label,
+          villeRef,
+          lat: userLat,
+          lon: userLon,
+          limit: Math.max(3, 10 - mapped.length),
+        };
+
+        const perplexityFormations = await fetchPerplexityFormations(perplexityInput);
+
+        if (perplexityFormations.length > 0) {
+          perplexityUsed = true;
+          allFormations = mergeFormationsWithoutDuplicates(mapped, perplexityFormations);
+          console.log(`Perplexity: ${perplexityFormations.length} formations ajoutées (total: ${allFormations.length})`);
+        }
+      } catch (error) {
+        console.error("Perplexity enrichment failed:", error);
+      }
+    }
+
+    // 6) Filtre niveau + compteurs
+    const count_total_avant_filtre = allFormations.length;
+
+    let results = allFormations;
     if (niveauFiltre !== "all") {
       results = results.filter((r: any) => r.niveau === niveauFiltre);
     }
@@ -1188,7 +1222,7 @@ Deno.serve(async (req: Request) => {
 
     /**
      * ✅ Anti-honte final :
-     * Si malgré tout on n’a rien (ou que le filtre niveau a tout viré),
+     * Si malgré tout on n'a rien (ou que le filtre niveau a tout viré),
      * on renvoie 0 plutôt que des trucs absurdes.
      */
     const noRelevantResults = results.length === 0;
@@ -1221,6 +1255,7 @@ Deno.serve(async (req: Request) => {
           strict_count: strictKept.length,
           merged_count_before_level_filter: count_total_avant_filtre,
           final_count_after_level_filter: results.length,
+          perplexity_enrichment_used: perplexityUsed,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
