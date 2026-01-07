@@ -9,6 +9,10 @@
  * - Pas de doublons (intitulé + organisme + ville)
  * - Formations cohérentes avec le métier recherché
  * - Distance réelle (jamais inventée) : géocodage + haversine
+ *
+ * Correctifs critiques :
+ * ✅ Garde-fou A : si raw.ville == villeRef et pas d'adresse -> on prend la géoloc villeRef (distance 0)
+ * ✅ Garde-fou B : si géocodage renvoie un point trop loin -> on annule la géoloc (distance 999)
  */
 
 const PPLX_API_URL = "https://api.perplexity.ai/chat/completions";
@@ -127,7 +131,8 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((((lat2 as number) * Math.PI) / 180)) *
+      Math.sin(dLon / 2) ** 2;
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
@@ -146,7 +151,6 @@ async function geocodeFrance(query: string): Promise<{ lat: number; lon: number;
   const q = query.trim();
   if (!q || q.length < 3) return null;
 
-  // On essaye "municipality" puis "city" puis fallback (plus permissif)
   const tries: Array<{ url: string; minScore: number }> = [
     {
       url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=housenumber`,
@@ -210,6 +214,12 @@ function inferNiveauFromHint(hint: string | undefined): string {
   return "N/A";
 }
 
+function normalizeAlternance(v: any): "Oui" | "Non" | "Non renseigné" {
+  if (v === "Oui") return "Oui";
+  if (v === "Non") return "Non";
+  return "Non renseigné";
+}
+
 /**
  * Appelle Perplexity AI pour obtenir des formations supplémentaires
  */
@@ -222,7 +232,6 @@ export async function fetchPerplexityFormations(input: PerplexityFormationInput)
     return [];
   }
 
-  // Prompts : on force un JSON strict + infos alternance + 2 sources
   const systemPrompt = `Tu es un expert en formations professionnelles françaises.
 Tu dois trouver des formations RÉELLES, VÉRIFIABLES et pertinentes pour le métier "${metierLabel}" près de "${villeRef}".
 
@@ -304,20 +313,23 @@ IMPORTANT :
       return [];
     }
 
+    const villeRefClean = cleanText(villeRef);
+
     const enriched: EnrichedFormation[] = [];
 
     for (const raw of rawFormations) {
       // champs requis
-      if (!raw.title || !raw.organisme || !raw.ville || !raw.url1 || !raw.url2) {
-        continue;
-      }
+      if (!raw.title || !raw.organisme || !raw.ville || !raw.url1 || !raw.url2) continue;
 
       // URLs validées + domaines différents
       const urlsValid = await validateUrls(raw.url1, raw.url2);
       if (!urlsValid) continue;
 
+      const rawVilleClean = cleanText(raw.ville);
+      const hasAddress = !!(raw.address && raw.address.trim().length >= 6);
+
       // Géocodage : d'abord adresse, sinon (organisme + ville), sinon ville
-      const q1 = raw.address ? `${raw.address} ${raw.ville}` : "";
+      const q1 = hasAddress ? `${raw.address} ${raw.ville}` : "";
       const q2 = `${raw.organisme} ${raw.ville}`;
       const q3 = raw.ville;
 
@@ -330,17 +342,54 @@ IMPORTANT :
       let formationLon: number | undefined;
       let distance_km = 999;
 
-      if (geo?.lat != null && geo?.lon != null) {
-        formationLat = geo.lat;
-        formationLon = geo.lon;
-        distance_km = round1(haversineKm(lat, lon, formationLat, formationLon));
+      // =========================
+      // ✅ GARDE-FOU A
+      // Si la ville annoncée == villeRef ET pas d'adresse,
+      // on évite de géocoder un texte flou -> on place sur la villeRef (distance 0)
+      // =========================
+      if (!hasAddress && rawVilleClean && rawVilleClean === villeRefClean) {
+        formationLat = lat;
+        formationLon = lon;
+        distance_km = 0;
+      } else if (geo?.lat != null && geo?.lon != null) {
+        // distance réelle calculée
+        const d = round1(haversineKm(lat, lon, geo.lat, geo.lon));
+
+        // =========================
+        // ✅ GARDE-FOU B
+        // Si le géocodage part en vrille (point trop loin), on annule la géoloc
+        // =========================
+        const MAX_REASONABLE_KM = 200;
+
+        if (d <= MAX_REASONABLE_KM) {
+          formationLat = geo.lat;
+          formationLon = geo.lon;
+          distance_km = d;
+        } else {
+          // si malgré tout raw.ville == villeRef -> on retombe sur villeRef
+          if (!hasAddress && rawVilleClean && rawVilleClean === villeRefClean) {
+            formationLat = lat;
+            formationLon = lon;
+            distance_km = 0;
+          } else {
+            formationLat = undefined;
+            formationLon = undefined;
+            distance_km = 999;
+          }
+        }
       }
 
       const niveau = inferNiveauFromHint(raw.diploma_hint);
 
-      const alternance = raw.alternance === "Oui" || raw.alternance === "Non" ? raw.alternance : "Non renseigné";
+      const alternance = normalizeAlternance(raw.alternance);
       const modalite = (raw.modalite ?? "").toString().trim() || "Non renseigné";
       const rncp = (raw.rncp ?? "").toString().trim() || "Non renseigné";
+
+      const reasons = [
+        "Formation trouvée sur des sources vérifiées",
+        "Correspond à votre métier recherché",
+        distance_km === 0 ? "Localisation estimée (ville)" : distance_km !== 999 ? "Proche de votre ville" : "Localisation non confirmée",
+      ].slice(0, 3);
 
       enriched.push({
         id: `pplx_${crypto.randomUUID()}`,
@@ -358,11 +407,7 @@ IMPORTANT :
         niveau,
         match: {
           score: 25, // Score modéré pour rester derrière LBA si LBA est bon
-          reasons: [
-            "Formation trouvée sur des sources vérifiées",
-            "Correspond à votre métier recherché",
-            distance_km !== 999 ? "Proche de votre ville" : "Localisation non confirmée",
-          ].slice(0, 3),
+          reasons,
         },
       });
     }
