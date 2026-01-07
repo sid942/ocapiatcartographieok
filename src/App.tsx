@@ -14,7 +14,7 @@ import type {
   SearchMode,
 } from "./types";
 
-// --- CONFIGURATION SUPABASE (idéalement à déplacer dans src/lib/supabase.ts) ---
+// --- CONFIGURATION SUPABASE ---
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
@@ -25,13 +25,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
-// -----------------------------------------------------------------------------
+// ----------------------------
 
 function normalizeForSearch(s: string) {
   return (s ?? "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, ""); // retire accents
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function humanizeMode(mode?: SearchMode) {
@@ -42,7 +42,7 @@ function humanizeMode(mode?: SearchMode) {
     case "relaxed":
       return {
         label: "Élargi",
-        hint: "On garde les plus proches quand c’est trop strict.",
+        hint: "On assouplit la pertinence pour éviter un résultat vide, en gardant les plus proches en tête.",
       };
 
     case "fallback_rome":
@@ -68,6 +68,12 @@ function humanizeMode(mode?: SearchMode) {
   }
 }
 
+function shouldShowFallbackBanner(mode?: SearchMode) {
+  // On affiche “filets de sécurité” seulement quand on a réellement assoupli / fallback
+  if (!mode) return false;
+  return mode !== "strict";
+}
+
 function App() {
   const mapRef = useRef<FormationMapRef>(null);
 
@@ -84,10 +90,11 @@ function App() {
     // count affiché (après filtre niveau) — correspond à api.count
     count: number;
 
-    // total trouvé avant filtre niveau (si backend le renvoie)
+    // total trouvé avant filtre niveau
     countTotal?: number;
 
     mode?: SearchMode;
+    warnings?: SearchFormationsResponse["warnings"];
     debug?: SearchFormationsResponse["debug"];
   } | null>(null);
 
@@ -118,28 +125,22 @@ function App() {
       const results = Array.isArray(api.formations) ? api.formations : [];
       setFormations(results);
 
-      // ✅ on lit count_total de façon safe (même si ton type TS n’est pas encore à jour)
-      const rawAny = data as any;
-      const countTotal =
-        typeof rawAny?.count_total === "number" ? (rawAny.count_total as number) : undefined;
-
       setSearchMeta({
         metier: api.metier_detecte,
         ville: api.ville_reference,
         rayon: api.rayon_applique,
 
         count: typeof api.count === "number" ? api.count : results.length,
-        countTotal,
+        countTotal: typeof api.count_total === "number" ? api.count_total : undefined,
 
         mode: api.mode,
+        warnings: api.warnings,
         debug: api.debug,
       });
 
       // Zoom auto sur la première formation géolocalisée
       if (mapRef.current && results.length > 0) {
-        const firstGeo = results.find(
-          (f) => typeof f.lat === "number" && typeof f.lon === "number"
-        );
+        const firstGeo = results.find((f) => typeof f.lat === "number" && typeof f.lon === "number");
         if (firstGeo) {
           setTimeout(() => mapRef.current?.flyToFormation(firstGeo), 300);
         }
@@ -161,11 +162,18 @@ function App() {
 
   const showEmptyState = !isLoading && formations.length === 0 && !error && hasSearched;
 
-  const isExpandedRadius =
-    !!searchMeta?.rayon && normalizeForSearch(searchMeta.rayon).includes("elargi");
+  const rayonNormalized = normalizeForSearch(searchMeta?.rayon ?? "");
+  const isExpandedRadius = rayonNormalized.includes("elargi") || rayonNormalized.includes("élargi");
 
   const modeInfo = humanizeMode(searchMeta?.mode);
-  const isNonStrictMode = !!searchMeta?.mode && searchMeta.mode !== "strict";
+  const showFallbackBanner = shouldShowFallbackBanner(searchMeta?.mode);
+
+  const farResults = !!searchMeta?.warnings?.far_results;
+  const geoScore = typeof searchMeta?.warnings?.geocode_score === "number" ? searchMeta.warnings.geocode_score : null;
+
+  // On ne déclenche un “géocodage approximatif” que si vraiment utile (éviter de faire peur)
+  const showGeoApprox =
+    geoScore !== null && geoScore > 0 && geoScore < 0.55 && normalizeForSearch(searchMeta?.ville ?? "").length <= 10;
 
   const emptyStateMessage = (() => {
     const dbg = searchMeta?.debug;
@@ -177,10 +185,10 @@ function App() {
     }
 
     if (typeof raw === "number" && raw > 0 && typeof keptStrict === "number" && keptStrict === 0) {
-      return "Des formations existent, mais aucune n’a passé le filtre de pertinence. Essayez d’élargir la zone ou de choisir un métier voisin.";
+      return "Des formations existent, mais aucune n’a passé le filtre de pertinence. Essayez une autre ville proche ou un métier voisin.";
     }
 
-    return "Essayez une autre zone ou élargissez la recherche. (Le moteur privilégie les formations les plus pertinentes.)";
+    return "Essayez une autre zone. Le moteur privilégie toujours les formations les plus pertinentes.";
   })();
 
   return (
@@ -238,7 +246,8 @@ function App() {
                 <span>{searchMeta.rayon}</span>
               </div>
 
-              {isExpandedRadius && (
+              {/* On n’affiche pas un doublon si la string du rayon contient déjà “élargi” */}
+              {!rayonNormalized.includes("elargi automatiquement") && isExpandedRadius && (
                 <div className="text-[10px] text-gray-500 italic pt-1 border-t border-[#47A152]/20">
                   Rayon élargi automatiquement pour proposer assez de formations.
                 </div>
@@ -250,6 +259,20 @@ function App() {
                   {modeInfo.hint ? (
                     <span className="block text-gray-500/90 mt-0.5">{modeInfo.hint}</span>
                   ) : null}
+                </div>
+              )}
+
+              {/* Warning discret si géocodage un peu approximatif */}
+              {showGeoApprox && (
+                <div className="text-[10px] text-gray-500 italic pt-1 border-t border-[#47A152]/20">
+                  Note : localisation approximative. Si besoin, précise la ville (ex : “Montpellier”, “Montélimar”…).
+                </div>
+              )}
+
+              {/* Warning “loin” (anti-honte) seulement si backend le dit */}
+              {farResults && (
+                <div className="text-[11px] text-gray-700 bg-white/70 border border-yellow-200 rounded-md p-2 mt-2">
+                  Certaines formations sont éloignées : le moteur privilégie les plus proches, mais élargit si nécessaire.
                 </div>
               )}
             </div>
@@ -270,16 +293,15 @@ function App() {
           <div className="px-4 pb-4 animate-in fade-in duration-500">
             <div className="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               {formations.length} formation(s) affichée(s)
-              {typeof searchMeta?.countTotal === "number" &&
-              searchMeta.countTotal !== formations.length ? (
+              {typeof searchMeta?.countTotal === "number" && searchMeta.countTotal !== formations.length ? (
                 <span className="normal-case font-normal ml-1 text-gray-400">
                   (sur {searchMeta.countTotal})
                 </span>
               ) : null}
             </div>
 
-            {/* Si mode non strict, avertissement “humain” */}
-            {isNonStrictMode && (
+            {/* Message “filets de sécurité” uniquement quand non strict */}
+            {showFallbackBanner && (
               <div className="mb-3 text-[11px] text-gray-600 bg-yellow-50 border border-yellow-200 rounded-md p-2">
                 Un mode de secours a été activé pour éviter un résultat vide. Les premiers résultats restent les plus proches
                 et les plus cohérents.
