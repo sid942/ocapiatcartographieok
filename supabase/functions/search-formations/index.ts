@@ -10,62 +10,113 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-// Définition stricte d'un profil métier
+// Mode de validation métier
+type ValidationMode = "KEYWORD_ONLY" | "KEYWORD_OR_ROME" | "KEYWORD_AND_ROME";
+
+// Définition stricte d'un profil métier (amélioré pour la pertinence)
 interface JobProfile {
   label: string;
   romes: string[];          // Codes officiels pour l'API
   radius: number;           // Rayon MAX strict en km
-  keywords_required: string[]; // Au moins UN de ces mots doit être présent (ou le code ROME)
+  keywords_required: string[]; // Mots clés métier spécifiques
   keywords_banned: string[];   // Si un de ces mots est présent => POUBELLE DIRECTE
   priority_domains: string[];  // Pour l'IA (contexte)
+
+  // NOUVEAUX PARAMETRES QUALITE
+  validation_mode: ValidationMode; // Mode de validation
+  min_keyword_matches?: number;    // Nombre minimum de keywords requis (défaut: 1)
+  weak_keywords?: string[];        // Mots génériques qui ne suffisent pas seuls
+  synonymes?: string[];            // Variantes utiles
+  banned_phrases?: string[];       // Expressions à exclure en priorité
 }
 
-// LA MATRICE DE VÉRITÉ (C'est ici que tu règles l'intelligence)
+// LISTE GLOBALE D'EXCLUSION (appliquée à TOUS les métiers)
+const BANNED_GLOBAL_RAW = [
+  "sûreté", "systèmes de sûreté", "sécurité incendie", "agent de sécurité",
+  "bâtiment", "maçon", "maçonnerie", "menuiserie", "menuisier", "plomberie", "plombier", "électricien", "peintre",
+  "informatique", "réseau", "développeur", "cybersécurité", "administrateur système", "web", "logiciel",
+  "banque", "assurance", "immobilier", "crédit",
+  "cuisine", "restauration", "hôtellerie", "cuisinier", "serveur", "barman",
+  "aéronautique", "avion", "aérien",
+  "esthétique", "coiffure", "beauté",
+  "transport urbain", "bus", "métro", "taxi", "ambulance", "VTC",
+  "santé", "infirmier", "aide soignant", "médical",
+  "enseignement", "professeur", "formateur",
+  "juridique", "avocat", "notaire"
+];
+
+// LA MATRICE DE VÉRITÉ RENFORCÉE (Configuration métier stricte)
 const JOB_CONFIG: Record<string, JobProfile> = {
   "silo": {
     label: "Agent de Silo",
-    romes: ["A1416", "A1101"], // Conduite d'engins + Stockage
-    radius: 70, // <--- TA DEMANDE : 70KM MAXIMUM
-    keywords_required: ["silo", "grain", "céréal", "stockage", "agricole", "conduite"],
-    keywords_banned: ["bâtiment", "maçon", "menuisier", "vendeur", "cuisine"], 
+    romes: ["A1416", "A1101"],
+    radius: 70,
+    validation_mode: "KEYWORD_ONLY",
+    min_keyword_matches: 1,
+    keywords_required: ["silo", "grain", "céréale", "stockage grain", "collecte céréales", "moissonneur", "séchoir"],
+    weak_keywords: ["agricole"],
+    keywords_banned: ["bâtiment", "menuisier", "vendeur", "cuisine", "commerce"],
+    banned_phrases: ["silo à ciment", "silo béton"],
+    synonymes: ["céréales", "grains", "stockage agricole"],
     priority_domains: ["AGRI_COEUR", "AGRI_CONDUITE"]
   },
   "chauffeur": {
     label: "Chauffeur Agricole",
-    romes: ["A1101", "N4101"], 
+    romes: ["A1101", "N4101"],
     radius: 100,
-    keywords_required: ["tracteur", "conduite", "agricole", "routier", "spl", "pl", "benne"],
-    keywords_banned: ["bus", "tourisme", "taxi", "ambulance"],
+    validation_mode: "KEYWORD_ONLY",
+    min_keyword_matches: 2,
+    keywords_required: ["tracteur", "agricole", "benne céréalière", "moissonneuse", "engin agricole", "machinisme", "exploitation agricole"],
+    weak_keywords: ["conduite", "spl", "permis"],
+    keywords_banned: ["tourisme", "taxi", "ambulance", "transport urbain", "voyageurs"],
+    banned_phrases: ["transport de personnes", "chauffeur de bus"],
+    synonymes: ["conducteur tracteur", "conducteur engins agricoles"],
     priority_domains: ["AGRI_CONDUITE", "TRANSPORT"]
   },
   "responsable_silo": {
     label: "Responsable de Silo",
     romes: ["A1301", "A1303"],
-    radius: 150, // Plus rare, on cherche plus loin
-    keywords_required: ["responsable", "gestion", "chef", "management", "exploitation"],
+    radius: 150,
+    validation_mode: "KEYWORD_AND_ROME",
+    min_keyword_matches: 2,
+    keywords_required: ["silo", "stockage", "collecte", "céréales", "coopérative agricole", "négoce agricole"],
+    weak_keywords: ["responsable", "gestion", "chef", "management"],
     keywords_banned: [],
+    banned_phrases: [],
+    synonymes: ["chef de silo", "responsable stockage", "gestionnaire silo"],
     priority_domains: ["AGRI_ENCADREMENT"]
   },
   "maintenance": {
     label: "Maintenance Agricole",
-    romes: ["I1602", "I1304"], // Maintenance Engins + Indus
+    romes: ["I1602", "I1304"],
     radius: 100,
-    keywords_required: ["agricole", "tracteur", "machinisme", "agroéquipement", "maintenance"],
-    keywords_banned: ["bâtiment", "informatique", "réseau", "avion", "auto ", "véhicule léger"], // On évite le garage auto du coin
+    validation_mode: "KEYWORD_AND_ROME",
+    min_keyword_matches: 2,
+    keywords_required: ["agroéquipement", "machinisme agricole", "tracteur", "moissonneuse", "matériel agricole", "engins agricoles"],
+    weak_keywords: ["maintenance", "technicien"],
+    keywords_banned: ["bâtiment", "réseau", "avion", "véhicule léger", "automobile"],
+    banned_phrases: ["maintenance informatique", "maintenance aéronautique"],
+    synonymes: ["mécanique agricole", "réparation matériel agricole"],
     priority_domains: ["MAINTENANCE_AGRI"]
   },
   "technico": {
     label: "Technico-Commercial Agri",
     romes: ["D1407", "D1402"],
     radius: 100,
-    keywords_required: ["technico", "commercial", "vente", "négociation", "agri"],
-    keywords_banned: ["immobilier", "assurances", "banque", "mode"],
+    validation_mode: "KEYWORD_AND_ROME",
+    min_keyword_matches: 2,
+    keywords_required: ["intrants", "semences", "phytosanitaire", "nutrition animale", "agrofourniture", "coopérative agricole", "négoce agricole", "engrais", "produits phytopharmaceutiques"],
+    weak_keywords: ["commercial", "vente", "technico"],
+    keywords_banned: ["immobilier", "assurance", "banque", "mode", "textile", "cosmétique"],
+    banned_phrases: [],
+    synonymes: ["conseiller agricole", "commercial agricole"],
     priority_domains: ["COMMERCE_AGRI"]
   },
   "default": {
     label: "Recherche Générale",
     romes: ["A1416"],
     radius: 50,
+    validation_mode: "KEYWORD_OR_ROME",
     keywords_required: [],
     keywords_banned: [],
     priority_domains: ["AGRI_COEUR"]
@@ -75,6 +126,12 @@ const JOB_CONFIG: Record<string, JobProfile> = {
 // ==================================================================================
 // 1. OUTILS DE PRÉCISION (MATHS & LOGIQUE)
 // ==================================================================================
+
+// Mode debug (désactiver en prod)
+const DEBUG = false;
+
+// Pré-nettoyage de la liste globale d'exclusion
+let BANNED_GLOBAL: string[] = [];
 
 // Calcul de distance en km (FLOAT pour précision)
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -102,13 +159,19 @@ function cleanText(text: string | null | undefined): string {
 
 // Nettoyage d'un tableau de keywords
 function cleanKeywords(keywords: string[]): string[] {
-  return keywords.map(kw => cleanText(kw));
+  return keywords.map(kw => cleanText(kw)).filter(kw => kw.length >= 3); // Filtre mots trop courts
 }
 
 // Vérification si un mot entier est présent (évite "pl" qui match "diplome")
 function includesWord(text: string, word: string): boolean {
+  if (word.length < 3) return false; // Mots trop courts ignorés
   const regex = new RegExp(`\\b${word}\\b`, 'i');
   return regex.test(text);
+}
+
+// Vérification si une phrase est présente
+function includesPhrase(text: string, phrase: string): boolean {
+  return text.includes(phrase);
 }
 
 // Normalisation du niveau
@@ -119,38 +182,141 @@ function normalizeNiveau(niveau: string | null | undefined): '3' | '4' | '5' | '
   return 'all';
 }
 
-// LE JUGE IMPITOYABLE : Est-ce que cette formation est valide ?
-function isFormationValid(formation: any, config: JobProfile, userLat: number, userLon: number, cleanedBanned: string[], cleanedRequired: string[]): boolean {
+// Interface pour le résultat de validation (debug)
+interface ValidationResult {
+  valid: boolean;
+  reason?: string;
+}
 
-  // 1. Check Géographique (Le plus rapide à vérifier)
-  // Si LBA renvoie un truc à 80km et qu'on veut 70km, c'est NON.
+// LE JUGE IMPITOYABLE V2 : Validation avec scoring intelligent
+function isFormationValid(
+  formation: any,
+  config: JobProfile,
+  userLat: number,
+  userLon: number,
+  cleanedBanned: string[],
+  cleanedRequired: string[],
+  cleanedWeak: string[],
+  cleanedBannedPhrases: string[],
+  cleanedSynonymes: string[]
+): ValidationResult {
+
+  const formationTitle = formation.title || "";
+
+  // 1. CHECK GÉOGRAPHIQUE (le plus rapide)
   const dist = haversineKm(userLat, userLon, formation.place.latitude, formation.place.longitude);
-  if (dist > config.radius) return false;
+  if (dist > config.radius) {
+    if (DEBUG) console.log(`❌ [${formationTitle}] Distance: ${dist.toFixed(1)}km > ${config.radius}km`);
+    return { valid: false, reason: "distance" };
+  }
 
-  // Préparation du texte à analyser (Titre + Nom Organisme)
+  // 2. PRÉPARATION DU TEXTE
   const fullText = cleanText(`${formation.title} ${formation.company?.name || ""}`);
 
-  // 2. Check des BANIS (Sécurité anti-pollution)
-  // Ex: Si on cherche "Maintenance" et qu'on trouve "Bâtiment", on tue.
-  for (const banned of cleanedBanned) {
-    // Double vérification : mot entier OU inclusion simple
-    if (includesWord(fullText, banned) || fullText.includes(banned)) {
-      return false;
+  // 3. CHECK BANNISSEMENT GLOBAL (appliqué à tous les métiers)
+  for (const banned of BANNED_GLOBAL) {
+    if (includesWord(fullText, banned) || includesPhrase(fullText, banned)) {
+      if (DEBUG) console.log(`❌ [${formationTitle}] Banned global: "${banned}"`);
+      return { valid: false, reason: `banned_global: ${banned}` };
     }
   }
 
-  // 3. Check de COHÉRENCE (Requis)
-  // Si la liste est vide, on accepte tout (cas fallback), sinon il faut matcher.
-  if (cleanedRequired.length > 0) {
-    // Au moins un keyword via mot entier OU inclusion
-    const hasKeyword = cleanedRequired.some(kw => includesWord(fullText, kw) || fullText.includes(kw));
-    // Si pas de mot clé, on vérifie si le code ROME match (si dispo dans la réponse LBA)
-    const hasRome = formation.romes ? formation.romes.some((r: any) => config.romes.includes(r.code)) : false;
-
-    if (!hasKeyword && !hasRome) return false;
+  // 4. CHECK BANNISSEMENT MÉTIER (phrases prioritaires)
+  for (const phrase of cleanedBannedPhrases) {
+    if (includesPhrase(fullText, phrase)) {
+      if (DEBUG) console.log(`❌ [${formationTitle}] Banned phrase: "${phrase}"`);
+      return { valid: false, reason: `banned_phrase: ${phrase}` };
+    }
   }
 
-  return true;
+  // 5. CHECK BANNISSEMENT MÉTIER (mots individuels)
+  for (const banned of cleanedBanned) {
+    if (includesWord(fullText, banned) || includesPhrase(fullText, banned)) {
+      if (DEBUG) console.log(`❌ [${formationTitle}] Banned keyword: "${banned}"`);
+      return { valid: false, reason: `banned_keyword: ${banned}` };
+    }
+  }
+
+  // 6. SCORING KEYWORDS
+  // Compter les matches sur keywords_required + synonymes
+  const allPositiveKeywords = [...cleanedRequired, ...cleanedSynonymes];
+  let keywordHits = 0;
+  let weakHits = 0;
+  const matchedKeywords: string[] = [];
+
+  for (const kw of allPositiveKeywords) {
+    if (includesWord(fullText, kw) || includesPhrase(fullText, kw)) {
+      keywordHits++;
+      matchedKeywords.push(kw);
+    }
+  }
+
+  for (const weak of cleanedWeak) {
+    if (includesWord(fullText, weak) || includesPhrase(fullText, weak)) {
+      weakHits++;
+    }
+  }
+
+  // 7. CHECK ROME
+  const hasRome = formation.romes ? formation.romes.some((r: any) => config.romes.includes(r.code)) : false;
+
+  // 8. APPLICATION DU MODE DE VALIDATION
+  const minMatches = config.min_keyword_matches || 1;
+
+  switch (config.validation_mode) {
+    case "KEYWORD_ONLY":
+      // Exiger des keywords, ET s'assurer que ce ne sont pas QUE des weak
+      if (keywordHits < minMatches) {
+        if (DEBUG) console.log(`❌ [${formationTitle}] KEYWORD_ONLY: ${keywordHits} < ${minMatches}`);
+        return { valid: false, reason: `keyword_only: ${keywordHits} < ${minMatches}` };
+      }
+      // Si on a des weak keywords configurés, on veut au moins 1 keyword "fort"
+      if (cleanedWeak.length > 0 && keywordHits === weakHits) {
+        if (DEBUG) console.log(`❌ [${formationTitle}] Seulement des weak keywords`);
+        return { valid: false, reason: "only_weak_keywords" };
+      }
+      if (DEBUG) console.log(`✅ [${formationTitle}] KEYWORD_ONLY OK: ${matchedKeywords.join(", ")}`);
+      return { valid: true };
+
+    case "KEYWORD_AND_ROME":
+      // Exiger ROME ET keywords
+      if (!hasRome) {
+        if (DEBUG) console.log(`❌ [${formationTitle}] KEYWORD_AND_ROME: pas de ROME match`);
+        return { valid: false, reason: "no_rome" };
+      }
+      if (keywordHits < minMatches) {
+        if (DEBUG) console.log(`❌ [${formationTitle}] KEYWORD_AND_ROME: ${keywordHits} < ${minMatches}`);
+        return { valid: false, reason: `keyword_and_rome: ${keywordHits} < ${minMatches}` };
+      }
+      if (DEBUG) console.log(`✅ [${formationTitle}] KEYWORD_AND_ROME OK: ROME + ${matchedKeywords.join(", ")}`);
+      return { valid: true };
+
+    case "KEYWORD_OR_ROME":
+      // Accepter si keywords OU ROME, mais avec sécurité si ROME seul
+      const hasEnoughKeywords = keywordHits >= minMatches && (cleanedWeak.length === 0 || keywordHits > weakHits);
+
+      if (hasEnoughKeywords) {
+        if (DEBUG) console.log(`✅ [${formationTitle}] KEYWORD_OR_ROME OK via keywords: ${matchedKeywords.join(", ")}`);
+        return { valid: true };
+      }
+
+      if (hasRome) {
+        // ROME seul : appliquer sécurité supplémentaire
+        // Si on a des keywords configurés mais AUCUN ne matche, c'est suspect
+        if (cleanedRequired.length > 0 && keywordHits === 0) {
+          if (DEBUG) console.log(`❌ [${formationTitle}] ROME seul mais aucun keyword métier`);
+          return { valid: false, reason: "rome_only_no_keywords" };
+        }
+        if (DEBUG) console.log(`✅ [${formationTitle}] KEYWORD_OR_ROME OK via ROME`);
+        return { valid: true };
+      }
+
+      if (DEBUG) console.log(`❌ [${formationTitle}] KEYWORD_OR_ROME: ni keywords ni ROME`);
+      return { valid: false, reason: "no_keyword_no_rome" };
+
+    default:
+      return { valid: false, reason: "invalid_mode" };
+  }
 }
 
 // ==================================================================================
@@ -203,10 +369,15 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
 
   try {
+    // INITIALISATION : Pré-nettoyage de la liste globale d'exclusion (une fois)
+    if (BANNED_GLOBAL.length === 0) {
+      BANNED_GLOBAL = cleanKeywords(BANNED_GLOBAL_RAW);
+      if (DEBUG) console.log(`📋 BANNED_GLOBAL initialisé avec ${BANNED_GLOBAL.length} termes`);
+    }
+
     const { metier, ville, niveau } = await req.json();
 
     // 1. Identification du profil métier (Mapping Intelligent)
-    // On cherche la clé qui correspond le mieux à l'input utilisateur
     let jobKey = "default";
     const inputClean = cleanText(metier || "");
 
@@ -218,9 +389,17 @@ Deno.serve(async (req: Request) => {
 
     const config = JOB_CONFIG[jobKey] || JOB_CONFIG["default"];
 
-    // Pré-nettoyage des keywords pour cohérence avec cleanText
+    // Pré-nettoyage de TOUS les paramètres métier
     const cleanedRequired = cleanKeywords(config.keywords_required);
     const cleanedBanned = cleanKeywords(config.keywords_banned);
+    const cleanedWeak = cleanKeywords(config.weak_keywords || []);
+    const cleanedBannedPhrases = cleanKeywords(config.banned_phrases || []);
+    const cleanedSynonymes = cleanKeywords(config.synonymes || []);
+
+    if (DEBUG) {
+      console.log(`\n🎯 Métier: ${config.label} (mode: ${config.validation_mode})`);
+      console.log(`📍 Keywords requis: ${cleanedRequired.length}, Weak: ${cleanedWeak.length}, Synonymes: ${cleanedSynonymes.length}`);
+    }
 
     // Normalisation du niveau
     const niveauFiltre = normalizeNiveau(niveau);
@@ -233,15 +412,30 @@ Deno.serve(async (req: Request) => {
     const [userLon, userLat] = geoData.features[0].geometry.coordinates;
     const villeRef = geoData.features[0].properties.label;
 
-    // 3. Récupération des données (LBA uniquement pour la fiabilité V1, IA possible en extension)
+    // 3. Récupération des données (LBA)
     const rawFormations = await fetchLBA(config, userLat, userLon);
+    if (DEBUG) console.log(`📦 Récupéré ${rawFormations.length} formations brutes depuis LBA`);
 
-    // 4. LE FILTRAGE INTELLIGENT
-    const validFormations = rawFormations.filter((f: any) => isFormationValid(f, config, userLat, userLon, cleanedBanned, cleanedRequired));
+    // 4. FILTRAGE INTELLIGENT V2 avec scoring
+    const validFormations = rawFormations.filter((f: any) => {
+      const result = isFormationValid(
+        f,
+        config,
+        userLat,
+        userLon,
+        cleanedBanned,
+        cleanedRequired,
+        cleanedWeak,
+        cleanedBannedPhrases,
+        cleanedSynonymes
+      );
+      return result.valid;
+    });
 
-    // 5. Formatage pour le frontend (Standardisation)
+    if (DEBUG) console.log(`✅ ${validFormations.length} formations valides après filtrage\n`);
+
+    // 5. Formatage pour le frontend
     let results = validFormations.map((f: any) => {
-      // Recalcul précis de la distance (FLOAT)
       const trueDist = haversineKm(userLat, userLon, f.place.latitude, f.place.longitude);
 
       return {
@@ -249,13 +443,9 @@ Deno.serve(async (req: Request) => {
         intitule: f.title,
         organisme: f.company?.name || "Organisme inconnu",
         ville: f.place.city,
-
-        // --- COORDONNÉES POUR LA CARTE ---
         lat: f.place.latitude,
         lon: f.place.longitude,
-        // ---------------------------------
-
-        distance_km: Math.round(trueDist * 10) / 10, // Arrondi à 1 décimale pour affichage
+        distance_km: Math.round(trueDist * 10) / 10,
         tags: [config.label, Math.round(trueDist * 10) / 10 + " km"],
         url: f.url,
         niveau: f.diplomaLevel || "N/A"
@@ -273,7 +463,7 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({
       metier_detecte: config.label,
       ville_reference: villeRef,
-      rayon_applique: config.radius + " km", // Rayon STRICT appliqué
+      rayon_applique: config.radius + " km",
       count: results.length,
       formations: results
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
