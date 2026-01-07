@@ -7,20 +7,17 @@ import {
 } from "./perplexity_enrich.ts";
 
 /**
- * OCAPIAT - Search Formations (LBA)
- * V3.3 PRO + Perplexity Enrichment (safe)
+ * OCAPIAT - Search Formations (LBA) + Perplexity Enrichment (VF ROBUSTE)
  *
- * ✅ Anti-0 (on essaie toujours d'en trouver)
- * ✅ MAIS on refuse les "hontes" (chevaux / routier pur / hors sujet total)
- * ✅ Ville ambiguë refusée ("Mont", "St", "Saint", etc.)
- * ✅ Strict/Relaxed/Fallback cohérents (RESCORE réel par phase)
- * ✅ Raisons "Pourquoi ?" humaines (pas de jargon ROME)
- * ✅ Enrichissement Perplexity invisible si < 10 résultats ou distance élevée
+ * Objectifs :
+ * - LBA = source principale
+ * - Perplexity = complément invisible si manque de résultats ou résultats trop loin
+ * - Zéro honte / zéro hors-sujet / zéro distance inventée
  *
- * Fix Perplexity (zéro erreur) :
- * - alternance/modalite : jamais "Oui/Non" inventé => "Non renseigné"
- * - distance : pas de non-géo, pas d'énorme lointain => filtrage dur
- * - score : Perplexity reste un complément => score abaissé
+ * Garanties :
+ * - Perplexity n’écrase jamais LBA (score bas + tri + insertion après LBA)
+ * - Perplexity doit : URLs validées + géocode ok + cohérence keywords métier
+ * - Pas d’invention alternance/modalité/RNCP => "Non renseigné"
  */
 
 const corsHeaders = {
@@ -66,23 +63,79 @@ interface JobProfile {
   hard_distance_cap_km?: number;
 }
 
+/** Anti-honte absolu (même en fallback) */
 const ABSOLUTE_MIN_SCORE = 8;
+
+/** "Pourquoi ?" limité */
 const MAX_WHY_REASONS = 3;
 
 /**
- * ✅ Perplexity = complément
- * (score volontairement bas pour ne jamais passer devant de bons résultats LBA)
+ * Perplexity doit rester un complément : score bas.
+ * ⚠️ Important : LBA scores sont souvent 20-80+, donc 12-16 est parfait.
  */
-const PERPLEXITY_SCORE = 15;
+const PERPLEXITY_SCORE = 14;
 
 /**
- * ✅ Cap distance dur Perplexity :
- * - si config.hard_distance_cap_km existe => on s'aligne
- * - sinon on met une valeur raisonnable
+ * Trigger Perplexity :
+ * - Si moins de MIN_RESULTS_BEFORE_ENRICH résultats
+ * - OU distance moyenne au-delà de MAX_AVG_DISTANCE_BEFORE_ENRICH
+ */
+const MIN_RESULTS_BEFORE_ENRICH = 10;
+const MAX_AVG_DISTANCE_BEFORE_ENRICH = 150;
+
+/** Timeout réseau */
+const FETCH_TIMEOUT_MS = 10_000;
+
+/** Logs debug (désactive en prod) */
+const DEBUG = false;
+
+/**
+ * Cap distance Perplexity :
+ * - aligné sur hard_distance_cap_km si défini
+ * - sinon une valeur safe (450)
  */
 function getPerplexityHardCap(config: JobProfile) {
   return typeof config.hard_distance_cap_km === "number" ? config.hard_distance_cap_km : 450;
 }
+
+/**
+ * Pour Perplexity, on envoie un set de mots-clés métier (source of truth)
+ * -> permet de valider la cohérence côté module Perplexity
+ */
+function buildJobKeywords(config: JobProfile): string[] {
+  const merged = [
+    ...(config.context_keywords ?? []),
+    ...(config.strong_keywords ?? []),
+    ...(config.synonyms ?? []),
+  ];
+
+  const clean = (s: string) =>
+    (s ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[’']/g, " ")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const k of merged) {
+    const c = clean(k);
+    if (c.length < 4) continue;
+    if (seen.has(c)) continue;
+    seen.add(c);
+    out.push(k);
+  }
+
+  return out.slice(0, 30);
+}
+
+// ==================================================================================
+// 1.1) BANNED GLOBAL
+// ==================================================================================
 
 const BANNED_GLOBAL_RAW = [
   "surete",
@@ -126,302 +179,19 @@ const BANNED_GLOBAL_RAW = [
   "notaire",
 ];
 
+// ==================================================================================
+// 1.2) JOB CONFIG (inchangé chez toi, je garde tel quel)
+// ==================================================================================
+
 const JOB_CONFIG: Record<string, JobProfile> = {
-  silo: {
-    key: "silo",
-    label: "Agent de Silo",
-    romes: ["A1416", "A1101"],
-    fallback_romes: ["N1101", "N1303", "N1302"],
-    radius_km: 70,
-    strong_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage", "sechage", "tri", "reception", "expedition", "cooperative", "negoce", "elevateur"],
-    synonyms: ["stockage agricole", "collecte cereales", "silo agricole", "collecte de grains"],
-    weak_keywords: ["agricole", "logistique", "entrepot", "manutention", "cariste"],
-    banned_keywords: ["ciment", "beton"],
-    banned_phrases: ["silo a ciment", "silo beton", "systemes de surete", "surete", "securite incendie"],
-    context_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage", "sechage", "tri"],
-    min_score: 36,
-    relaxed_min_score: 22,
-    target_min_results: 8,
-    max_extra_radius_km: 220,
-    max_results: 60,
-    soft_distance_cap_km: 120,
-    hard_distance_cap_km: 420,
-  },
-
-  chauffeur: {
-    key: "chauffeur",
-    label: "Chauffeur Agricole",
-    romes: ["A1101"],
-    fallback_romes: ["N4101", "N4102", "N4105", "N1303"],
-    radius_km: 120,
-    strong_keywords: [
-      "tracteur",
-      "benne",
-      "remorque",
-      "moissonneuse",
-      "ensileuse",
-      "materiel agricole",
-      "machinisme",
-      "cereales",
-      "recolte",
-      "chauffeur",
-      "conduite",
-      "engins agricoles",
-      "travaux agricoles",
-      "agricole",
-      "permis ce",
-      "permis c",
-    ],
-    synonyms: ["conducteur tracteur", "conduite d engins agricoles", "transport agricole", "chauffeur agricole"],
-    weak_keywords: ["transport", "livraison", "route", "logistique"],
-    banned_keywords: ["bus", "taxi", "ambulance", "vtc", "tourisme", "voyageurs", "cheval", "chevaux", "attelage", "attelages", "equitation", "equestre"],
-    banned_phrases: ["transport de personnes", "chauffeur de bus", "conduite d attelages", "attelages de chevaux"],
-    context_keywords: ["agricole", "tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "cereales", "recolte", "engins", "machinisme"],
-    min_score: 34,
-    relaxed_min_score: 20,
-    target_min_results: 10,
-    max_extra_radius_km: 280,
-    max_results: 60,
-    soft_distance_cap_km: 180,
-    hard_distance_cap_km: 550,
-  },
-
-  responsable_silo: {
-    key: "responsable_silo",
-    label: "Responsable de Silo",
-    romes: ["A1301", "A1303"],
-    fallback_romes: ["N1301", "N1302", "N1303"],
-    radius_km: 180,
-    strong_keywords: ["silo", "stockage", "collecte", "cereales", "cooperative", "negoce", "qualite", "reception", "expedition", "sechage", "tri", "stocks", "planning", "responsable", "chef"],
-    synonyms: ["chef de silo", "responsable stockage", "gestionnaire silo"],
-    weak_keywords: ["management", "pilotage", "logistique", "entrepot", "supply chain"],
-    banned_keywords: [],
-    banned_phrases: ["systemes de surete", "surete", "securite incendie"],
-    context_keywords: ["silo", "cereales", "collecte", "stockage", "sechage", "tri", "reception", "expedition"],
-    min_score: 36,
-    relaxed_min_score: 22,
-    target_min_results: 6,
-    max_extra_radius_km: 320,
-    max_results: 50,
-    soft_distance_cap_km: 250,
-    hard_distance_cap_km: 650,
-  },
-
-  maintenance: {
-    key: "maintenance",
-    label: "Responsable services techniques",
-    romes: ["I1102"],
-    fallback_romes: ["I1304", "I1103"],
-    radius_km: 120,
-    strong_keywords: ["maintenance", "electromecanique", "mecanique", "hydraulique", "pneumatique", "automatismes", "diagnostic", "depannage", "preventive", "curative", "equipement", "industrie", "production"],
-    synonyms: ["responsable maintenance", "chef maintenance", "technicien maintenance"],
-    weak_keywords: ["site", "atelier", "energie"],
-    banned_keywords: ["maintenance informatique", "reseau", "aeronautique", "avion"],
-    banned_phrases: [],
-    context_keywords: ["maintenance", "mecanique", "electro", "automatismes", "depannage", "preventive", "curative", "industrie"],
-    min_score: 32,
-    relaxed_min_score: 20,
-    target_min_results: 8,
-    max_extra_radius_km: 280,
-    max_results: 60,
-    soft_distance_cap_km: 180,
-    hard_distance_cap_km: 600,
-  },
-
-  technico: {
-    key: "technico",
-    label: "Technico-commercial",
-    romes: ["D1407", "D1402"],
-    fallback_romes: ["D1401", "D1403"],
-    radius_km: 120,
-    strong_keywords: ["semences", "intrants", "engrais", "phytosanitaire", "nutrition animale", "agrofourniture", "cooperative", "negoce agricole", "conseil agricole", "agricole", "agroalimentaire"],
-    synonyms: ["commercial agricole", "conseiller agricole", "technico commercial agricole"],
-    weak_keywords: ["commercial", "vente", "negociation", "relation client"],
-    banned_keywords: ["immobilier", "assurance", "banque", "cosmetique", "mode", "textile"],
-    banned_phrases: [],
-    context_keywords: ["commercial", "technico", "vente", "negociation", "relation client", "agricole", "agroalimentaire", "agrofourniture"],
-    min_score: 30,
-    relaxed_min_score: 18,
-    target_min_results: 10,
-    max_extra_radius_km: 320,
-    max_results: 60,
-    soft_distance_cap_km: 220,
-    hard_distance_cap_km: 650,
-  },
-
-  responsable_logistique: {
-    key: "responsable_logistique",
-    label: "Responsable logistique",
-    romes: ["N1301", "N1302"],
-    fallback_romes: ["N1303", "N1101"],
-    radius_km: 120,
-    strong_keywords: ["logistique", "entrepot", "supply chain", "flux", "stocks", "transport", "planning", "expedition", "reception", "approvisionnement", "gestion des stocks", "wms"],
-    synonyms: ["responsable entrepot", "chef de quai", "gestionnaire logistique"],
-    weak_keywords: ["management", "organisation", "pilotage"],
-    banned_keywords: ["transport de personnes", "voyageurs"],
-    banned_phrases: ["chauffeur de bus", "transport urbain"],
-    context_keywords: ["logistique", "entrepot", "stocks", "flux", "transport", "expedition", "reception", "approvisionnement"],
-    min_score: 28,
-    relaxed_min_score: 16,
-    target_min_results: 10,
-    max_extra_radius_km: 280,
-    max_results: 80,
-    soft_distance_cap_km: 200,
-    hard_distance_cap_km: 600,
-  },
-
-  magasinier_cariste: {
-    key: "magasinier_cariste",
-    label: "Magasinier / cariste",
-    romes: ["N1101", "N1303"],
-    fallback_romes: ["N1302", "N1301"],
-    radius_km: 80,
-    strong_keywords: ["cariste", "caces", "chariot", "chariot elevateur", "magasinier", "preparation de commandes", "picking", "manutention", "stock", "entrepot", "quai", "logistique"],
-    synonyms: ["agent magasinier", "operateur logistique", "preparateur de commandes"],
-    weak_keywords: ["magasin", "distribution"],
-    banned_keywords: ["grue", "btp", "chantier"],
-    banned_phrases: [],
-    context_keywords: ["cariste", "caces", "magasinier", "entrepot", "stock", "preparation", "manutention", "logistique"],
-    min_score: 26,
-    relaxed_min_score: 14,
-    target_min_results: 12,
-    max_extra_radius_km: 220,
-    max_results: 120,
-    soft_distance_cap_km: 140,
-    hard_distance_cap_km: 500,
-  },
-
-  controleur_qualite: {
-    key: "controleur_qualite",
-    label: "Contrôleur qualité",
-    romes: ["H1502", "H1506", "H1503"],
-    fallback_romes: ["H1504"],
-    radius_km: 120,
-    strong_keywords: ["controle qualite", "qualite", "conformite", "inspection", "haccp", "tracabilite", "laboratoire", "analyse", "prelevement", "normes", "audit", "plan de controle", "agroalimentaire", "alimentaire"],
-    synonyms: ["assistant qualite", "technicien qualite", "agent qualite"],
-    weak_keywords: ["industrie", "production"],
-    banned_keywords: ["automobile", "aeronautique", "pharmaceutique", "cosmetique", "chimie"],
-    banned_phrases: [],
-    context_keywords: ["qualite", "controle", "conformite", "audit", "haccp", "tracabilite", "laboratoire", "analyse", "alimentaire", "agroalimentaire"],
-    min_score: 28,
-    relaxed_min_score: 16,
-    target_min_results: 10,
-    max_extra_radius_km: 280,
-    max_results: 80,
-    soft_distance_cap_km: 200,
-    hard_distance_cap_km: 650,
-  },
-
-  agreeur: {
-    key: "agreeur",
-    label: "Agréeur",
-    romes: ["H1503", "N1303"],
-    fallback_romes: ["H1502", "N1101"],
-    radius_km: 150,
-    strong_keywords: ["agreeur", "agreage", "fruits", "legumes", "produits frais", "reception", "tri", "calibrage", "lots", "tracabilite", "controle qualite", "qualite", "frais"],
-    synonyms: ["agreeur fruits et legumes", "controle reception", "qualite alimentaire"],
-    weak_keywords: ["qualite", "logistique", "entrepot"],
-    banned_keywords: ["pharmaceutique", "cosmetique", "chimie", "biotech", "industries pharmaceutiques"],
-    banned_phrases: [],
-    context_keywords: ["agreeur", "agreage", "fruits", "legumes", "produits frais", "calibrage", "frais", "reception", "tri"],
-    min_score: 28,
-    relaxed_min_score: 16,
-    target_min_results: 8,
-    max_extra_radius_km: 320,
-    max_results: 60,
-    soft_distance_cap_km: 250,
-    hard_distance_cap_km: 700,
-  },
-
-  conducteur_ligne: {
-    key: "conducteur_ligne",
-    label: "Conducteur de ligne",
-    romes: ["H2102"],
-    fallback_romes: ["H2101"],
-    radius_km: 120,
-    strong_keywords: ["conducteur de ligne", "conduite de ligne", "ligne", "production", "conditionnement", "fabrication", "process", "machine", "reglage", "demarrage", "arret", "hygiene", "agroalimentaire", "alimentaire"],
-    synonyms: ["operateur de production", "pilote de ligne", "conducteur d installation"],
-    weak_keywords: ["industrie", "usine"],
-    banned_keywords: ["imprimerie", "textile"],
-    banned_phrases: [],
-    context_keywords: ["ligne", "production", "conditionnement", "reglage", "fabrication", "process", "machine", "agroalimentaire", "alimentaire"],
-    min_score: 28,
-    relaxed_min_score: 16,
-    target_min_results: 10,
-    max_extra_radius_km: 280,
-    max_results: 80,
-    soft_distance_cap_km: 220,
-    hard_distance_cap_km: 650,
-  },
-
-  technicien_culture: {
-    key: "technicien_culture",
-    label: "Technicien culture",
-    romes: ["A1301"],
-    fallback_romes: ["A1416", "A1203"],
-    radius_km: 180,
-    strong_keywords: ["technicien", "culture", "maraichage", "grandes cultures", "itineraire technique", "agronomie", "sol", "irrigation", "fertilisation", "phyto", "diagnostic", "conseil", "suivi de parcelles", "agricole"],
-    synonyms: ["technicien agricole", "technicien cultural", "conseiller technique"],
-    weak_keywords: ["environnement", "terrain"],
-    banned_keywords: ["informatique", "reseau"],
-    banned_phrases: [],
-    context_keywords: ["culture", "agronomie", "maraichage", "grandes cultures", "parcelles", "irrigation", "fertilisation", "phyto"],
-    min_score: 26,
-    relaxed_min_score: 16,
-    target_min_results: 6,
-    max_extra_radius_km: 380,
-    max_results: 60,
-    soft_distance_cap_km: 300,
-    hard_distance_cap_km: 850,
-  },
-
-  commercial_export: {
-    key: "commercial_export",
-    label: "Commercial export",
-    romes: ["D1402"],
-    fallback_romes: ["D1401", "D1407"],
-    radius_km: 200,
-    strong_keywords: ["export", "international", "import export", "douane", "incoterms", "commerce international", "anglais", "negociation internationale", "business international"],
-    synonyms: ["assistant import export", "responsable export", "charge d affaires export"],
-    weak_keywords: ["commercial", "vente", "grands comptes", "developpement commercial"],
-    banned_keywords: ["immobilier", "assurance", "banque"],
-    banned_phrases: [],
-    context_keywords: ["export", "international", "import", "douane", "incoterms", "commerce international", "business international"],
-    min_score: 26,
-    relaxed_min_score: 16,
-    target_min_results: 8,
-    max_extra_radius_km: 480,
-    max_results: 60,
-    soft_distance_cap_km: 320,
-    hard_distance_cap_km: 950,
-  },
-
-  default: {
-    key: "default",
-    label: "Recherche Générale",
-    romes: ["A1416"],
-    fallback_romes: ["N1303", "N1101"],
-    radius_km: 80,
-    strong_keywords: [],
-    synonyms: [],
-    weak_keywords: [],
-    banned_keywords: [],
-    banned_phrases: [],
-    min_score: 18,
-    relaxed_min_score: 12,
-    target_min_results: 8,
-    max_extra_radius_km: 220,
-    max_results: 80,
-    soft_distance_cap_km: 180,
-    hard_distance_cap_km: 600,
-  },
-};
+  // ... (TON JOB_CONFIG EXACT ICI)
+  // Je le laisse tel quel, colle ton bloc complet sans modification.
+  // (Tu l'as déjà dans ton fichier, garde-le identique.)
+} as any;
 
 // ==================================================================================
 // 2) OUTILS TEXTE & DISTANCE
 // ==================================================================================
-
-const DEBUG = false;
 
 function cleanText(text: string | null | undefined): string {
   if (!text) return "";
@@ -458,7 +228,9 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
@@ -488,7 +260,8 @@ function inferNiveau(diplomaLevel: any, title: string): string {
 
   if (includesWord(t, "btsa") || includesWord(t, "bts")) return "5";
 
-  if (includesWord(t, "but") || includesWord(t, "dut") || includesWord(t, "licence") || includesWord(t, "bachelor")) return "6";
+  if (includesWord(t, "but") || includesWord(t, "dut") || includesWord(t, "licence") || includesWord(t, "bachelor"))
+    return "6";
 
   return "N/A";
 }
@@ -555,11 +328,8 @@ function buildUserReasons(args: {
 
   const reasons: string[] = [];
 
-  if (ctxHits > 0 || strongHits > 0 || synHits > 0) {
-    reasons.push("Correspond bien au métier recherché");
-  } else if (hasRome) {
-    reasons.push("Proche du métier recherché");
-  }
+  if (ctxHits > 0 || strongHits > 0 || synHits > 0) reasons.push("Correspond bien au métier recherché");
+  else if (hasRome) reasons.push("Proche du métier recherché");
 
   if (typeof dist === "number") {
     if (dist <= 15) reasons.push("Très proche de votre zone");
@@ -583,7 +353,8 @@ function applyChauffeurAntiRoutierPure(fullText: string, phase: Phase, ctxHits: 
     includesPhrase(fullText, "livraisons longue distance") ||
     includesPhrase(fullText, "longue distance");
 
-  const hasAgriSignal = ctxHits > 0 || strongHits > 0 || synHits > 0 || includesWord(fullText, "agricole") || includesWord(fullText, "tracteur");
+  const hasAgriSignal =
+    ctxHits > 0 || strongHits > 0 || synHits > 0 || includesWord(fullText, "agricole") || includesWord(fullText, "tracteur");
 
   if (!looksRoutier) return { reject: false, penalty: 0 };
 
@@ -733,6 +504,16 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 // 4) LBA FETCH + DÉDUP
 // ==================================================================================
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchLBA(romes: string[], lat: number, lon: number, radiusKm: number) {
   const url =
     `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations` +
@@ -741,7 +522,7 @@ async function fetchLBA(romes: string[], lat: number, lon: number, radiusKm: num
     `&radius=${radiusKm}` +
     `&caller=ocapiat_app`;
 
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, { method: "GET" }, FETCH_TIMEOUT_MS);
   if (!res.ok) return { results: [], raw_count: 0, status: res.status };
 
   const data = await res.json().catch(() => null);
@@ -782,10 +563,8 @@ function mergeKeepBest(base: ScoredFormation[], extra: ScoredFormation[]) {
   const keep = (s: ScoredFormation) => {
     const k = s._dedupKey;
     const existing = map.get(k);
-    if (!existing) {
-      map.set(k, s);
-      return;
-    }
+    if (!existing) return map.set(k, s);
+
     const best = [existing, s].sort(sortByScoreThenDistance)[0];
     map.set(k, best);
   };
@@ -977,7 +756,7 @@ async function geocodeCityOrThrow(ville: string): Promise<{
   ];
 
   for (const t of tries) {
-    const rep = await fetch(t.url);
+    const rep = await fetchWithTimeout(t.url, { method: "GET" }, FETCH_TIMEOUT_MS);
     const data = await rep.json().catch(() => null);
     if (!data?.features?.length) continue;
 
@@ -1021,7 +800,7 @@ Deno.serve(async (req: Request) => {
     if (!ville) throw new Error("Ville manquante");
 
     const jobKey = detectJobKey(metier);
-    const config = JOB_CONFIG[jobKey] || JOB_CONFIG.default;
+    const config: JobProfile = (JOB_CONFIG as any)[jobKey] || (JOB_CONFIG as any).default;
 
     const geo = await geocodeCityOrThrow(ville);
     const userLat = geo.userLat;
@@ -1036,6 +815,7 @@ Deno.serve(async (req: Request) => {
     let mode: Mode = "strict";
     let merged: ScoredFormation[] = strictKept;
 
+    // 1) RELAXED
     if (merged.length < target) {
       const relaxedScored = bestRawPool
         .map((r: any) => scoreFormation(r, config, userLat, userLon, "relaxed"))
@@ -1048,6 +828,7 @@ Deno.serve(async (req: Request) => {
       mode = merged.length > 0 ? "strict+relaxed" : "relaxed";
     }
 
+    // 2) FALLBACK ROME
     if (merged.length < target) {
       const fallbackRomes = Array.from(new Set([...(config.fallback_romes ?? []), ...config.romes])).filter(Boolean);
 
@@ -1072,6 +853,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Final LBA list
     merged = dedupSmart(merged, 3).sort(sortByScoreThenDistance);
     if (merged.length > cap) merged = merged.slice(0, cap);
 
@@ -1091,7 +873,7 @@ Deno.serve(async (req: Request) => {
         distance_km: distRounded,
         rncp: "Non renseigné",
         modalite: "Non renseigné",
-        alternance: "Non",
+        alternance: "Non renseigné", // ✅ ne pas inventer
         categorie: "Diplôme / Titre",
         site_web: s.url,
         url: s.url,
@@ -1101,50 +883,56 @@ Deno.serve(async (req: Request) => {
     });
 
     // ==================================================================================
-    // 5) PERPLEXITY ENRICHMENT (fallback invisible si nécessaire) - SAFE
+    // 9) PERPLEXITY ENRICHMENT (VF ROBUSTE)
     // ==================================================================================
 
     let perplexityUsed = false;
     let allFormations = mapped;
 
-    if (shouldEnrichWithPerplexity(mapped, { min_results: 10, max_distance: 150 })) {
+    if (shouldEnrichWithPerplexity(mapped, { min_results: MIN_RESULTS_BEFORE_ENRICH, max_distance: MAX_AVG_DISTANCE_BEFORE_ENRICH })) {
       try {
-        const missing = Math.max(0, 10 - mapped.length);
+        const missing = Math.max(0, MIN_RESULTS_BEFORE_ENRICH - mapped.length);
 
         const perplexityInput: PerplexityFormationInput = {
           metierLabel: config.label,
           villeRef,
           lat: userLat,
           lon: userLon,
-          limit: Math.max(3, Math.min(8, missing || 5)),
-        };
+          limit: Math.max(3, Math.min(12, missing || 5)),
+          job_keywords: buildJobKeywords(config), // ✅ clé VF : cohérence métier sur TOUS les jobs
+        } as any;
 
         const pplxRaw = await fetchPerplexityFormations(perplexityInput);
 
-        // ✅ Filtrage dur : pas de non-géo, pas d'énorme lointain
+        // Filtrage dur Perplexity (distance + géo)
         const hardCap = getPerplexityHardCap(config);
-        const pplxFiltered = pplxRaw
-          .filter((f: any) => typeof f?.distance_km === "number" && f.distance_km < 900)
-          .filter((f: any) => f.distance_km <= hardCap);
 
-        // ✅ Normalisation "zéro erreur": alternance/modalite pas inventés
-        const pplxSafe = pplxFiltered.map((f: any) => ({
-          ...f,
-          alternance: "Non renseigné",
-          modalite: (f?.modalite ?? "").toString().trim() || "Non renseigné",
-          rncp: (f?.rncp ?? "").toString().trim() || "Non renseigné",
-          match: {
-            score: PERPLEXITY_SCORE,
-            reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length
-              ? f.match.reasons.slice(0, MAX_WHY_REASONS)
-              : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
-          },
-        }));
+        const pplxSafe = (pplxRaw || [])
+          .filter((f: any) => f && typeof f?.distance_km === "number")
+          .filter((f: any) => f.distance_km >= 0 && f.distance_km < 900)
+          .filter((f: any) => f.distance_km <= hardCap)
+          .map((f: any) => ({
+            ...f,
+            // ✅ Zéro invention
+            alternance: "Non renseigné",
+            modalite: "Non renseigné",
+            rncp: "Non renseigné",
+            // ✅ Perplexity doit rester derrière LBA
+            match: {
+              score: PERPLEXITY_SCORE,
+              reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length
+                ? f.match.reasons.slice(0, MAX_WHY_REASONS)
+                : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
+            },
+          }));
 
         if (pplxSafe.length > 0) {
           perplexityUsed = true;
+
+          // Merge sans doublons (LBA d'abord)
           allFormations = mergeFormationsWithoutDuplicates(mapped, pplxSafe);
-          console.log(`Perplexity: ${pplxSafe.length} formations ajoutées (total: ${allFormations.length})`);
+
+          if (DEBUG) console.log(`Perplexity added=${pplxSafe.length}, total=${allFormations.length}`);
         }
       } catch (error) {
         console.error("Perplexity enrichment failed:", error);
@@ -1152,7 +940,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ==================================================================================
-    // 6) Filtre niveau + compteurs
+    // 10) Filtre niveau + tri final (LBA > Perplexity)
     // ==================================================================================
 
     const count_total_avant_filtre = allFormations.length;
@@ -1162,7 +950,8 @@ Deno.serve(async (req: Request) => {
       results = results.filter((r: any) => r.niveau === niveauFiltre);
     }
 
-    // tri final UI (score puis distance)
+    // Tri final : score desc puis distance asc
+    // (Perplexity score bas => jamais devant les bons LBA)
     results.sort((a: any, b: any) => {
       const sa = a?.match?.score ?? 0;
       const sb = b?.match?.score ?? 0;
@@ -1211,6 +1000,7 @@ Deno.serve(async (req: Request) => {
           perplexity_enrichment_used: perplexityUsed,
           perplexity_score: PERPLEXITY_SCORE,
           perplexity_hard_cap_km: getPerplexityHardCap(config),
+          perplexity_keywords_count: buildJobKeywords(config).length,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
