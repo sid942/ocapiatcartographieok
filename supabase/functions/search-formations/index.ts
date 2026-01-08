@@ -12,11 +12,11 @@ import { searchRefEA } from "./refeaSearch.ts";
 
 /**
  * OCAPIAT - Search Formations (LBA) + RefEA + Perplexity (enrich)
- * ✅ VF ULTRA ROBUSTE / ZÉRO HORS-SUJET / ZÉRO “HONTE”
+ * ✅ VF ULTRA ROBUSTE / ZÉRO HORS-SUJET / ZÉRO "HONTE"
  *
  * Principes :
  * - RefEA = source #1 (socle) -> Filtrée par refeaRules.ts
- * - LBA = source principale “grand public” -> Filtrée par HARD_RULES_BY_JOB ici
+ * - LBA = source principale "grand public" -> Filtrée par HARD_RULES_BY_JOB ici
  * - Perplexity = complément seulement si nécessaire -> Filtrée par HARD_RULES_BY_JOB ici
  */
 
@@ -77,7 +77,7 @@ function cleanText(text: string | null | undefined): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[’']/g, " ")
+    .replace(/['']/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -1043,7 +1043,7 @@ Deno.serve(async (req: Request) => {
     const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
     const maxDist = results.reduce((m: number, r: any) => { const d = typeof r?.distance_km === "number" ? r.distance_km : 999; return Math.max(m, d); }, 0);
     return new Response(JSON.stringify({
-      metier_detecte: config.label, ville_reference: villeRef, rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`, niveau_filtre: niveauFiltre, mode, count_total: count_total_avant_filtre, count: results.length, formations: results, warnings: { far_results: maxDist > soft, geocode_score: geo.geoScore, geocode_type: geo.geoTypeTried, no_relevant_results: results.length === 0, absolute_min_score: ABSOLUTE_MIN_SCORE }, debug: { jobKey, ...debug, strict_count: strictKept.length, perplexity_enrichment_used: perplexityUsed, hard_filter_enabled: true },
+      metier_detecte: config.label, ville_reference: villeRef, rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`, niveau_filtre: niveauFiltre, mode, count_total: allFormations.length, count: results.length, formations: results, warnings: { far_results: maxDist > soft, geocode_score: geo.geoScore, geocode_type: geo.geoTypeTried, no_relevant_results: results.length === 0, absolute_min_score: ABSOLUTE_MIN_SCORE }, debug: { jobKey, ...debug, strict_count: strictKept.length, perplexity_enrichment_used: perplexityUsed, hard_filter_enabled: true },
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error?.message || "Erreur inconnue" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
