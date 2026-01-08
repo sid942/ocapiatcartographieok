@@ -1,24 +1,25 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
 import {
   fetchPerplexityFormations,
   shouldEnrichWithPerplexity,
   mergeFormationsWithoutDuplicates,
   type PerplexityFormationInput,
 } from "./perplexity_enrich.ts";
+
 import { searchRefEA } from "./refeaSearch.ts";
 
 /**
- * OCAPIAT - Search Formations (LBA) + Perplexity Enrichment
+ * OCAPIAT - Search Formations (LBA) + RefEA + Perplexity (enrich)
  * ✅ VF ULTRA ROBUSTE / ZÉRO HORS-SUJET / ZÉRO “HONTE”
  *
  * Principes :
- * - LBA = source principale
- * - Perplexity = complément seulement si nécessaire
- * - FILTRE THÉMATIQUE UNIVERSEL ("THEME GUARD") :
- *    -> rejette tous les domaines hors-thème (BTP/IT/santé/etc.)
- *    -> rejets métiers (ex: chauffeur: forestier, équin, routier pur)
- * - STRICT : si aucun signal métier → rejet (pas juste une pénalité)
- * - Distances : uniquement réelles (LBA) ; Perplexity déjà sécurisé dans son module
+ * - RefEA = source #1 (socle) + garde-fou (hard filter métier)
+ * - LBA = source principale “grand public” (toujours filtrée)
+ * - Perplexity = complément seulement si nécessaire (toujours filtrée)
+ * - THEME GUARD : rejette domaines hors-thème (BTP/IT/santé/etc.) + rejets métiers (routier pur etc.)
+ * - HARD FILTER METIER : rejette le “hors-métier” même si c’est agricole (paysage/vigne/etc. pour chauffeur)
+ * - STRICT : si aucun signal métier → rejet
  * - Alternance/modalité/RNCP : jamais inventé => "Non renseigné"
  */
 
@@ -84,7 +85,7 @@ function getPerplexityHardCap(config: JobProfile) {
 }
 
 // ==================================================================================
-// 2) TEXTE UTILS (unique) + DISTANCE
+// 2) TEXTE UTILS + DISTANCE
 // ==================================================================================
 
 function cleanText(text: string | null | undefined): string {
@@ -182,16 +183,7 @@ type ThemeDomain =
   | "sport_coaching";
 
 const THEME_BANNED: Record<ThemeDomain, string[]> = {
-  security: [
-    "securite",
-    "surete",
-    "agent de securite",
-    "ssi",
-    "incendie",
-    "vigile",
-    "surveillance",
-    "cynophile",
-  ],
+  security: ["securite", "surete", "agent de securite", "ssi", "incendie", "vigile", "surveillance", "cynophile"],
   construction: [
     "btp",
     "batiment",
@@ -211,42 +203,10 @@ const THEME_BANNED: Record<ThemeDomain, string[]> = {
     "terrassement",
     "vrd",
   ],
-  it: [
-    "informatique",
-    "developpeur",
-    "programmation",
-    "code",
-    "web",
-    "wordpress",
-    "reseau",
-    "cybersecurite",
-    "systeme",
-    "data",
-    "cloud",
-    "devops",
-    "sql",
-  ],
-  finance: [
-    "banque",
-    "assurance",
-    "immobilier",
-    "credit",
-    "finance",
-    "patrimoine",
-    "courtier",
-    "comptable",
-    "audit financier",
-  ],
+  it: ["informatique", "developpeur", "programmation", "code", "web", "wordpress", "reseau", "cybersecurite", "systeme", "data", "cloud", "devops", "sql"],
+  finance: ["banque", "assurance", "immobilier", "credit", "finance", "patrimoine", "courtier", "comptable", "audit financier"],
   hospitality: ["cuisine", "restauration", "hotellerie", "cuisinier", "serveur", "barman", "chef de rang", "barista"],
-  health: [
-    "infirmier",
-    "infirmiere",
-    "aide soignant",
-    "medical",
-    "pharmacie",
-    "ambulancier",
-    "sage femme",
-  ],
+  health: ["infirmier", "infirmiere", "aide soignant", "medical", "pharmacie", "ambulancier", "sage femme"],
   law: ["avocat", "notaire", "juridique", "droit", "huissier"],
   beauty_fashion: ["esthetique", "coiffure", "cosmetique", "mode", "textile", "spa", "maquillage"],
   tourism_transport_people: [
@@ -261,32 +221,9 @@ const THEME_BANNED: Record<ThemeDomain, string[]> = {
     "conducteur de voyageurs",
     "transport urbain",
   ],
-  forestry: [
-    "forestier",
-    "foret",
-    "sylviculture",
-    "bucheronnage",
-    "debardage",
-    "elagage",
-    "abattage",
-    "tronconneuse",
-    "grume",
-    "grumier",
-  ],
+  forestry: ["forestier", "foret", "sylviculture", "bucheronnage", "debardage", "elagage", "abattage", "tronconneuse", "grume", "grumier"],
   animal_equestrian: ["equestre", "equitation", "cheval", "chevaux", "attelage", "attelages", "palefrenier"],
-  driving_road_heavy: [
-    "routier",
-    "transport routier",
-    "longue distance",
-    "messagerie",
-    "livraison longue distance",
-    "fimo",
-    "fco",
-    "conducteur routier",
-    "poids lourd",
-    "spl",
-    "super lourd",
-  ],
+  driving_road_heavy: ["routier", "transport routier", "longue distance", "messagerie", "livraison longue distance", "fimo", "fco", "conducteur routier", "poids lourd", "spl", "super lourd"],
   education_childcare: ["petite enfance", "creche", "atsem", "animateur", "animation", "educateur"],
   sport_coaching: ["coach sportif", "sport", "fitness", "bpjeps", "entrainement"],
 };
@@ -313,7 +250,6 @@ const JOB_EXTRA_BANNED_DOMAINS: Record<string, ThemeDomain[]> = {
   technicien_culture: ["forestry", "animal_equestrian"],
   responsable_logistique: ["driving_road_heavy", "tourism_transport_people"],
   magasinier_cariste: ["driving_road_heavy", "tourism_transport_people"],
-  // autres : rien de plus
 };
 
 function getThemeBannedList(jobKey: string): string[] {
@@ -334,7 +270,152 @@ function isThemeBanned(jobKey: string, fullText: string): boolean {
 }
 
 // ==================================================================================
-// 4) JOB CONFIG (tes profils)
+// 3bis) HARD FILTER METIER (anti "hors métier" même si agricole)
+// ==================================================================================
+
+type HardRules = {
+  must_any?: string[]; // au moins 1 mot/phrase présent
+  must_none?: string[]; // aucun mot/phrase présent
+  strict_min_must_hits?: number; // nb minimum de hits sur must_any (default 1)
+};
+
+function countHitsList(fullText: string, list?: string[]): number {
+  if (!list?.length) return 0;
+  let h = 0;
+  for (const kw of list.map(cleanText).filter(Boolean)) {
+    if (includesPhrase(fullText, kw) || includesWord(fullText, kw)) h++;
+  }
+  return h;
+}
+
+function shouldKeepByHardRules(jobKey: string, title: string, org: string): boolean {
+  const fullText = cleanText(`${title} ${org}`);
+  const rules = HARD_RULES_BY_JOB[jobKey] ?? HARD_RULES_BY_JOB.default;
+
+  if (rules.must_none?.length) {
+    for (const bad of rules.must_none.map(cleanText).filter(Boolean)) {
+      if (includesPhrase(fullText, bad) || includesWord(fullText, bad)) return false;
+    }
+  }
+
+  if (rules.must_any?.length) {
+    const hits = countHitsList(fullText, rules.must_any);
+    const minHits = typeof rules.strict_min_must_hits === "number" ? rules.strict_min_must_hits : 1;
+    if (hits < minHits) return false;
+  }
+
+  return true;
+}
+
+const HARD_RULES_BY_JOB: Record<string, HardRules> = {
+  chauffeur: {
+    // exige un signal clair "engins / machinisme / récolte"
+    must_any: [
+      "tracteur",
+      "machinisme",
+      "machines agricoles",
+      "machine agricole",
+      "conduite d engins",
+      "engins agricoles",
+      "moissonneuse",
+      "ensileuse",
+      "pulverisateur",
+      "pulverisateur",
+      "remorque",
+      "benne",
+      "recolte",
+      "travaux agricoles",
+      "agroequipement",
+      "agro equipement",
+      // inclus si présent dans ton dataset / libellés
+      "conduite et gestion de l entreprise agricole",
+      "cgea",
+      "cima",
+      "conduite de machines agricoles",
+      "conducteur de machines agricoles",
+      "pilotage de machines agricoles",
+    ],
+    // rejette les filières agricoles mais pas "chauffeur"
+    must_none: [
+      "amenagements paysagers",
+      "aménagements paysagers",
+      "paysagiste",
+      "fleuriste",
+      "horticulture",
+      "viticulture",
+      "oenologie",
+      "œnologie",
+      "commercialisation des vins",
+      "vins",
+      "bieres",
+      "bières",
+      "spiritueux",
+      "equins",
+      "equin",
+      "cheval",
+      "attelage",
+      "attelages",
+      "bac general",
+      "baccalaureat general",
+      "classe de 4eme",
+      "classe de 3eme",
+      "cycle orientation",
+      "college",
+    ],
+  },
+
+  silo: {
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "tri", "reception", "expedition", "élévateur", "elevateur"],
+    must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
+  },
+
+  responsable_silo: {
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "qualite", "qualité", "reception", "expedition", "stocks"],
+    must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
+  },
+
+  technicien_culture: {
+    must_any: ["culture", "maraichage", "maraîchage", "grandes cultures", "agronomie", "sol", "fertilisation", "phyto", "phytosanitaire", "itineraire technique", "itinéraire technique"],
+    must_none: ["amenagements paysagers", "aménagements paysagers", "paysage", "paysager"],
+  },
+
+  conducteur_ligne: {
+    must_any: ["conducteur de ligne", "conduite de ligne", "conditionnement", "production", "process", "reglage", "réglage", "agroalimentaire", "alimentaire"],
+  },
+
+  controleur_qualite: {
+    must_any: ["qualite", "qualité", "controle", "contrôle", "haccp", "tracabilite", "traçabilité", "laboratoire", "analyse", "audit"],
+  },
+
+  agreeur: {
+    must_any: ["agreeur", "agréeur", "agreage", "agréage", "fruits", "legumes", "légumes", "calibrage", "produits frais", "tri", "reception"],
+  },
+
+  responsable_logistique: {
+    must_any: ["logistique", "supply chain", "entrepot", "entrepôt", "stocks", "flux", "wms", "expedition", "expédition", "reception"],
+  },
+
+  magasinier_cariste: {
+    must_any: ["cariste", "caces", "chariot", "magasinier", "preparation", "préparation", "commandes", "picking", "manutention"],
+  },
+
+  maintenance: {
+    must_any: ["maintenance", "electromecanique", "électromécanique", "mecanique", "mécanique", "automatismes", "automatisme", "depannage", "dépannage"],
+  },
+
+  technico: {
+    must_any: ["technico", "agrofourniture", "semences", "intrants", "engrais", "phytosanitaire", "nutrition animale", "cooperative", "négoce", "negoce"],
+  },
+
+  commercial_export: {
+    must_any: ["export", "international", "import export", "douane", "incoterms", "commerce international", "anglais"],
+  },
+
+  default: {},
+};
+
+// ==================================================================================
+// 4) JOB CONFIG
 // ==================================================================================
 
 const JOB_CONFIG: Record<string, JobProfile> = {
@@ -344,21 +425,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1416", "A1101"],
     fallback_romes: ["N1101", "N1303", "N1302"],
     radius_km: 70,
-    strong_keywords: [
-      "silo",
-      "grain",
-      "grains",
-      "cereales",
-      "collecte",
-      "stockage",
-      "sechage",
-      "tri",
-      "reception",
-      "expedition",
-      "cooperative",
-      "negoce",
-      "elevateur",
-    ],
+    strong_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage", "sechage", "tri", "reception", "expedition", "cooperative", "negoce", "elevateur"],
     synonyms: ["stockage agricole", "collecte cereales", "silo agricole", "collecte de grains"],
     weak_keywords: ["agricole", "logistique", "entrepot", "manutention", "cariste"],
     banned_keywords: ["ciment", "beton"],
@@ -419,23 +486,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1301", "A1303"],
     fallback_romes: ["N1301", "N1302", "N1303"],
     radius_km: 180,
-    strong_keywords: [
-      "silo",
-      "stockage",
-      "collecte",
-      "cereales",
-      "cooperative",
-      "negoce",
-      "qualite",
-      "reception",
-      "expedition",
-      "sechage",
-      "tri",
-      "stocks",
-      "planning",
-      "responsable",
-      "chef",
-    ],
+    strong_keywords: ["silo", "stockage", "collecte", "cereales", "cooperative", "negoce", "qualite", "reception", "expedition", "sechage", "tri", "stocks", "planning", "responsable", "chef"],
     synonyms: ["chef de silo", "responsable stockage", "gestionnaire silo"],
     weak_keywords: ["management", "pilotage", "logistique", "entrepot", "supply chain"],
     banned_keywords: [],
@@ -456,21 +507,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["I1102"],
     fallback_romes: ["I1304", "I1103"],
     radius_km: 120,
-    strong_keywords: [
-      "maintenance",
-      "electromecanique",
-      "mecanique",
-      "hydraulique",
-      "pneumatique",
-      "automatismes",
-      "diagnostic",
-      "depannage",
-      "preventive",
-      "curative",
-      "equipement",
-      "industrie",
-      "production",
-    ],
+    strong_keywords: ["maintenance", "electromecanique", "mecanique", "hydraulique", "pneumatique", "automatismes", "diagnostic", "depannage", "preventive", "curative", "equipement", "industrie", "production"],
     synonyms: ["responsable maintenance", "chef maintenance", "technicien maintenance"],
     weak_keywords: ["site", "atelier", "energie"],
     banned_keywords: ["maintenance informatique", "reseau", "aeronautique", "avion"],
@@ -491,19 +528,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["D1407", "D1402"],
     fallback_romes: ["D1401", "D1403"],
     radius_km: 120,
-    strong_keywords: [
-      "semences",
-      "intrants",
-      "engrais",
-      "phytosanitaire",
-      "nutrition animale",
-      "agrofourniture",
-      "cooperative",
-      "negoce agricole",
-      "conseil agricole",
-      "agricole",
-      "agroalimentaire",
-    ],
+    strong_keywords: ["semences", "intrants", "engrais", "phytosanitaire", "nutrition animale", "agrofourniture", "cooperative", "negoce agricole", "conseil agricole", "agricole", "agroalimentaire"],
     synonyms: ["commercial agricole", "conseiller agricole", "technico commercial agricole"],
     weak_keywords: ["commercial", "vente", "negociation", "relation client"],
     banned_keywords: ["immobilier", "assurance", "banque", "cosmetique", "mode", "textile"],
@@ -524,20 +549,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["N1301", "N1302"],
     fallback_romes: ["N1303", "N1101"],
     radius_km: 120,
-    strong_keywords: [
-      "logistique",
-      "entrepot",
-      "supply chain",
-      "flux",
-      "stocks",
-      "transport",
-      "planning",
-      "expedition",
-      "reception",
-      "approvisionnement",
-      "gestion des stocks",
-      "wms",
-    ],
+    strong_keywords: ["logistique", "entrepot", "supply chain", "flux", "stocks", "transport", "planning", "expedition", "reception", "approvisionnement", "gestion des stocks", "wms"],
     synonyms: ["responsable entrepot", "chef de quai", "gestionnaire logistique"],
     weak_keywords: ["management", "organisation", "pilotage"],
     banned_keywords: ["transport de personnes", "voyageurs"],
@@ -558,20 +570,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["N1101", "N1303"],
     fallback_romes: ["N1302", "N1301"],
     radius_km: 80,
-    strong_keywords: [
-      "cariste",
-      "caces",
-      "chariot",
-      "chariot elevateur",
-      "magasinier",
-      "preparation de commandes",
-      "picking",
-      "manutention",
-      "stock",
-      "entrepot",
-      "quai",
-      "logistique",
-    ],
+    strong_keywords: ["cariste", "caces", "chariot", "chariot elevateur", "magasinier", "preparation de commandes", "picking", "manutention", "stock", "entrepot", "quai", "logistique"],
     synonyms: ["agent magasinier", "operateur logistique", "preparateur de commandes"],
     weak_keywords: ["magasin", "distribution"],
     banned_keywords: ["grue", "btp", "chantier"],
@@ -592,22 +591,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H1502", "H1506", "H1503"],
     fallback_romes: ["H1504"],
     radius_km: 120,
-    strong_keywords: [
-      "controle qualite",
-      "qualite",
-      "conformite",
-      "inspection",
-      "haccp",
-      "tracabilite",
-      "laboratoire",
-      "analyse",
-      "prelevement",
-      "normes",
-      "audit",
-      "plan de controle",
-      "agroalimentaire",
-      "alimentaire",
-    ],
+    strong_keywords: ["controle qualite", "qualite", "conformite", "inspection", "haccp", "tracabilite", "laboratoire", "analyse", "prelevement", "normes", "audit", "plan de controle", "agroalimentaire", "alimentaire"],
     synonyms: ["assistant qualite", "technicien qualite", "agent qualite"],
     weak_keywords: ["industrie", "production"],
     banned_keywords: ["automobile", "aeronautique", "pharmaceutique", "cosmetique", "chimie"],
@@ -628,21 +612,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H1503", "N1303"],
     fallback_romes: ["H1502", "N1101"],
     radius_km: 150,
-    strong_keywords: [
-      "agreeur",
-      "agreage",
-      "fruits",
-      "legumes",
-      "produits frais",
-      "reception",
-      "tri",
-      "calibrage",
-      "lots",
-      "tracabilite",
-      "controle qualite",
-      "qualite",
-      "frais",
-    ],
+    strong_keywords: ["agreeur", "agreage", "fruits", "legumes", "produits frais", "reception", "tri", "calibrage", "lots", "tracabilite", "controle qualite", "qualite", "frais"],
     synonyms: ["agreeur fruits et legumes", "controle reception", "qualite alimentaire"],
     weak_keywords: ["qualite", "logistique", "entrepot"],
     banned_keywords: ["pharmaceutique", "cosmetique", "chimie", "biotech", "industries pharmaceutiques"],
@@ -663,22 +633,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["H2102"],
     fallback_romes: ["H2101"],
     radius_km: 120,
-    strong_keywords: [
-      "conducteur de ligne",
-      "conduite de ligne",
-      "ligne",
-      "production",
-      "conditionnement",
-      "fabrication",
-      "process",
-      "machine",
-      "reglage",
-      "demarrage",
-      "arret",
-      "hygiene",
-      "agroalimentaire",
-      "alimentaire",
-    ],
+    strong_keywords: ["conducteur de ligne", "conduite de ligne", "ligne", "production", "conditionnement", "fabrication", "process", "machine", "reglage", "demarrage", "arret", "hygiene", "agroalimentaire", "alimentaire"],
     synonyms: ["operateur de production", "pilote de ligne", "conducteur d installation"],
     weak_keywords: ["industrie", "usine"],
     banned_keywords: ["imprimerie", "textile"],
@@ -699,22 +654,7 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     romes: ["A1301"],
     fallback_romes: ["A1416", "A1203"],
     radius_km: 180,
-    strong_keywords: [
-      "technicien",
-      "culture",
-      "maraichage",
-      "grandes cultures",
-      "itineraire technique",
-      "agronomie",
-      "sol",
-      "irrigation",
-      "fertilisation",
-      "phyto",
-      "diagnostic",
-      "conseil",
-      "suivi de parcelles",
-      "agricole",
-    ],
+    strong_keywords: ["technicien", "culture", "maraichage", "grandes cultures", "itineraire technique", "agronomie", "sol", "irrigation", "fertilisation", "phyto", "diagnostic", "conseil", "suivi de parcelles", "agricole"],
     synonyms: ["technicien agricole", "technicien cultural", "conseiller technique"],
     weak_keywords: ["environnement", "terrain"],
     banned_keywords: ["informatique", "reseau"],
@@ -821,7 +761,6 @@ function buildUserReasons(args: {
   config: JobProfile;
 }) {
   const { hasRome, ctxHits, strongHits, synHits, dist, config } = args;
-
   const reasons: string[] = [];
 
   if (ctxHits > 0 || strongHits > 0 || synHits > 0) reasons.push("Correspond bien au métier recherché");
@@ -921,7 +860,7 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 
   const hasThemeSignal = ctxHits > 0 || strongHits > 0 || synHits > 0;
 
-  // ✅ STRICT : si aucun signal métier => rejet direct (zéro hors-thème)
+  // ✅ STRICT : si aucun signal métier => rejet direct
   if (phase === "strict") {
     if (!hasThemeSignal && !hasRome) return null;
     if ((config.context_keywords?.length ?? 0) > 0 && !hasThemeSignal) return null;
@@ -1098,7 +1037,10 @@ async function getStrictAndPoolRaw(
   };
 }> {
   const baseRadius = config.radius_km;
-  const steps = [0, 30, 60, 100, 150, 200, 300, 420].filter((s) => s <= config.max_extra_radius_km);
+
+  // steps = extension MAX (on respecte max_extra_radius_km)
+  const rawSteps = [0, 30, 60, 100, 150, 200, 300, 420];
+  const steps = rawSteps.filter((s) => s <= config.max_extra_radius_km);
 
   let appliedRadius = baseRadius;
   let expanded = false;
@@ -1301,15 +1243,19 @@ Deno.serve(async (req: Request) => {
     const userLon = geo.userLon;
     const villeRef = geo.villeRef;
 
-    // ✅ 0) REFEA D'ABORD
-    const refeaResults = searchRefEA({
+    // ✅ 0) REFEA D'ABORD (puis HARD FILTER métier)
+    const refeaRaw = searchRefEA({
       jobLabel: config.label,
       ville: villeRef,
       userLat,
       userLon,
       radiusKm: 250,
-      limit: 20,
+      limit: 40, // on prend plus large puis on filtre dur
     });
+
+    const refeaResults = (refeaRaw || []).filter((f: any) =>
+      shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? "")
+    );
 
     // mapped = liste de résultats qu'on va renvoyer (on commence par RefEA)
     let mapped = refeaResults;
@@ -1322,7 +1268,7 @@ Deno.serve(async (req: Request) => {
     let mode: Mode = "strict";
     let merged: ScoredFormation[] = strictKept;
 
-    // 1) RELAXED (reste soumis au THEME GUARD car scoreFormation le fait)
+    // 1) RELAXED
     if (merged.length < target) {
       const relaxedScored = bestRawPool
         .map((r: any) => scoreFormation(r, config, userLat, userLon, "relaxed"))
@@ -1335,7 +1281,7 @@ Deno.serve(async (req: Request) => {
       mode = merged.length > 0 ? "strict+relaxed" : "relaxed";
     }
 
-    // 2) FALLBACK ROME (toujours THEME GUARD)
+    // 2) FALLBACK ROME
     if (merged.length < target) {
       const fallbackRomes = Array.from(new Set([...(config.fallback_romes ?? []), ...config.romes])).filter(Boolean);
 
@@ -1389,18 +1335,27 @@ Deno.serve(async (req: Request) => {
       };
     });
 
-    // Merge RefEA + LBA (RefEA en premier car déjà dans mapped)
-    mapped = mergeFormationsWithoutDuplicates(mapped, mappedLBA);
+    // ✅ HARD FILTER métier sur LBA
+    const mappedLBAFiltered = mappedLBA.filter((f: any) =>
+      shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? "")
+    );
+
+    // Merge RefEA + LBA (RefEA en premier)
+    mapped = mergeFormationsWithoutDuplicates(mapped, mappedLBAFiltered);
 
     // ==================================================================================
-    // PERPLEXITY ENRICHMENT (complément invisible)
-    // IMPORTANT: ne pas injecter de champs inconnus dans PerplexityFormationInput (sinon crash)
+    // PERPLEXITY ENRICHMENT (complément)
     // ==================================================================================
 
     let perplexityUsed = false;
     let allFormations = mapped;
 
-    if (shouldEnrichWithPerplexity(mapped, { min_results: MIN_RESULTS_BEFORE_ENRICH, max_distance: MAX_AVG_DISTANCE_BEFORE_ENRICH })) {
+    if (
+      shouldEnrichWithPerplexity(mapped, {
+        min_results: MIN_RESULTS_BEFORE_ENRICH,
+        max_distance: MAX_AVG_DISTANCE_BEFORE_ENRICH,
+      })
+    ) {
       try {
         const missing = Math.max(0, MIN_RESULTS_BEFORE_ENRICH - mapped.length);
 
@@ -1414,7 +1369,7 @@ Deno.serve(async (req: Request) => {
 
         const pplxRaw = await fetchPerplexityFormations(perplexityInput);
 
-        // Filtrage dur Perplexity (distance)
+        // Filtrage dur Perplexity (distance + champs)
         const hardCap = getPerplexityHardCap(config);
 
         const pplxSafe = (pplxRaw || [])
@@ -1428,16 +1383,22 @@ Deno.serve(async (req: Request) => {
             rncp: "Non renseigné",
             match: {
               score: PERPLEXITY_SCORE,
-              reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length
-                ? f.match.reasons.slice(0, MAX_WHY_REASONS)
-                : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
+              reasons:
+                Array.isArray(f?.match?.reasons) && f.match.reasons.length
+                  ? f.match.reasons.slice(0, MAX_WHY_REASONS)
+                  : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
             },
           }));
 
-        if (pplxSafe.length > 0) {
+        // ✅ HARD FILTER métier sur Perplexity
+        const pplxFinal = pplxSafe.filter((f: any) =>
+          shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? "")
+        );
+
+        if (pplxFinal.length > 0) {
           perplexityUsed = true;
-          allFormations = mergeFormationsWithoutDuplicates(mapped, pplxSafe);
-          if (DEBUG) console.log(`Perplexity added=${pplxSafe.length}, total=${allFormations.length}`);
+          allFormations = mergeFormationsWithoutDuplicates(mapped, pplxFinal);
+          if (DEBUG) console.log(`Perplexity added=${pplxFinal.length}, total=${allFormations.length}`);
         }
       } catch (error) {
         console.error("Perplexity enrichment failed:", error);
@@ -1503,6 +1464,7 @@ Deno.serve(async (req: Request) => {
           perplexity_enrichment_used: perplexityUsed,
           perplexity_score: PERPLEXITY_SCORE,
           perplexity_hard_cap_km: getPerplexityHardCap(config),
+          hard_filter_enabled: true,
         },
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
