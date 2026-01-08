@@ -10,7 +10,8 @@ export const REFEA_RULES: Record<string, Rules> = {
   
   "technico": { 
     mustAny: ["commerce", "commercial", "vente", "negociation", "technico", "distribution", "agrofourniture", "conseil vente", "business"],
-    forbidAny: ["paysagiste", "equitation", "cheval", "poisson", "foret", "animalerie", "fleuriste", "service a la personne", "animaux de compagnie", "jardins"],
+    // ✅ CORRECTION : Ajout de "sapver" et "service aux personnes" pour virer le social
+    forbidAny: ["paysagiste", "equitation", "cheval", "poisson", "foret", "animalerie", "fleuriste", "service a la personne", "services aux personnes", "sapver", "aide a la personne", "animaux de compagnie", "jardins"],
   },
 
   "commercial_export": {
@@ -19,14 +20,14 @@ export const REFEA_RULES: Record<string, Rules> = {
   },
 
   "silo": { 
-    // J'ajoute "agricole" tout court et "polyvalent" pour attraper plus large
-    mustAny: ["silo", "cereales", "grain", "stockage", "magasinage", "agroalimentaire", "qualite", "polyvalent", "agricole", "industries agroalimentaires", "transformation", "bio industries", "conduite de systemes industriels", "cgea", "grandes cultures", "equipements agricoles"],
-    forbidAny: ["eau", "assainissement", "hydraulique", "gemeau", "riviere", "equitation", "paysagiste", "foret", "dechets", "elevage", "soigneur"],
+    // ✅ CORRECTION : Retrait de "environnement" (sinon Bac Pro CGEA saute)
+    mustAny: ["silo", "cereales", "grain", "stockage", "magasinage", "agroalimentaire", "qualite", "polyvalent", "agricole", "industries agroalimentaires", "transformation", "bio industries", "conduite de systemes industriels", "cgea", "grandes cultures", "equipements agricoles", "conduite de machines"],
+    forbidAny: ["eau", "assainissement", "hydraulique", "gemeau", "riviere", "equitation", "paysagiste", "foret", "dechets", "soigneur", "canin", "felin"],
   },
 
   "responsable_silo": {
-    mustAny: ["cereales", "grain", "collecte", "stockage", "qualite", "logistique", "silo", "approvisionnement", "responsable", "industries agroalimentaires", "management agricole", "cgea"],
-    forbidAny: ["eau", "assainissement", "hydraulique", "gemeau", "riviere", "aquaculture", "equitation", "paysagiste", "foret"],
+    mustAny: ["cereales", "grain", "collecte", "stockage", "qualite", "logistique", "silo", "approvisionnement", "responsable", "industries agroalimentaires", "management agricole", "cgea", "chef de silo"],
+    forbidAny: ["eau", "assainissement", "hydraulique", "gemeau", "riviere", "aquaculture", "equitation", "paysagiste", "foret", "canin"],
   },
 
   "chauffeur": {
@@ -40,7 +41,6 @@ export const REFEA_RULES: Record<string, Rules> = {
   },
 
   "magasinier_cariste": {
-    // J'ajoute "agent de quai" et "entrepot"
     mustAny: ["cariste", "caces", "entrepot", "magasinier", "logistique", "stock", "preparation de commandes", "emballage", "quai", "reception", "expedition"],
     forbidAny: ["equitation", "paysagiste", "foret", "animalerie", "jardinerie", "vente"],
   },
@@ -51,13 +51,11 @@ export const REFEA_RULES: Record<string, Rules> = {
   },
 
   "controleur_qualite": {
-    // J'ai enlevé "mesure" et "instrumentation"
     mustAny: ["qualite", "haccp", "controle", "laboratoire", "agroalimentaire", "tracabilite", "analyse", "securite des aliments", "bioanalyse"],
-    forbidAny: ["equitation", "paysagiste", "foret", "eau", "environnement", "pollution", "cosmetique", "pharmaceutique", "mesures physiques"],
+    forbidAny: ["equitation", "paysagiste", "foret", "eau", "pollution", "cosmetique", "pharmaceutique", "mesures physiques"],
   },
 
   "agreeur": {
-    // J'ai enlevé "reception" pour ne pas avoir de logistique, et ajouté "logistique" dans les interdits
     mustAny: ["fruits", "legumes", "produits frais", "qualite", "tri", "calibrage", "agreage", "normalisation", "vegetal"],
     forbidAny: ["equitation", "paysagiste", "foret", "eau", "fleuriste", "logistique", "transport"],
   },
