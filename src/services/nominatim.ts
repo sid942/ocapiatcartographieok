@@ -196,3 +196,5 @@ export async function geocodeCity(
     return null;
   }
 }
+
+export { geocodeCity as geocodeCityToLatLon };
