@@ -749,6 +749,8 @@ Deno.serve(async (req: Request) => {
       for (const item of lbaRaw) {
         const intitule = String(item?.title || item?.intitule || "");
         const organisme = String(item?.company?.name || item?.organisme || "");
+        if (!filterByTrainingWhitelist(config.key, intitule, organisme)) continue;
+
 
         const itemLat = toFiniteNumber(item?.place?.latitude ?? item?.lat);
         const itemLon = toFiniteNumber(item?.place?.longitude ?? item?.lon);
@@ -848,6 +850,11 @@ Deno.serve(async (req: Request) => {
         };
 
         const raw = await fetchPerplexityFormations(pplxInput);
+
+const perplexityResults = (raw || []).filter((f: any) =>
+  filterByTrainingWhitelist(config.key, f?.intitule ?? "", f?.organisme ?? "")
+);
+
 
         // Nettoyage minimal + hard cap distance
         const hardCap = getPerplexityHardCap(config);
