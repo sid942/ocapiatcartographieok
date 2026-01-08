@@ -11,16 +11,15 @@ import { REFEA_RULES } from "./refeaRules.ts";
 
 /**
  * RefEA Search (offline dataset)
- * Version VALIDÉE EXPERT OCAPIAT + FIX ENCODAGE
+ * Version VALIDÉE EXPERT OCAPIAT + FIX ENCODAGE + NIVEAUX + URLS
  */
 
 // ----------------------------------------------------------------------
-// 1. UTILITAIRES (Encodage & Normalisation)
+// 1. UTILITAIRES (Encodage, URLs, Niveaux)
 // ----------------------------------------------------------------------
 
 /**
  * Répare les chaines mal encodées (Windows-1252 lu comme UTF-8).
- * Transforme "LycÃ©e" en "Lycée".
  */
 function fixEncoding(str: string | null | undefined): string {
   if (!str) return "";
@@ -36,12 +35,24 @@ function fixEncoding(str: string | null | undefined): string {
 }
 
 /**
+ * Ajoute https:// si manquant pour éviter les liens morts
+ */
+function fixUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  let clean = url.trim();
+  if (clean.length < 4) return null;
+  if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+    clean = "https://" + clean;
+  }
+  return clean;
+}
+
+/**
  * Formate une ville : "SAINT ETIENNE" -> "Saint Etienne"
  */
 function formatCity(str: string | null | undefined): string {
   const fixed = fixEncoding(str);
   if (!fixed) return "";
-  // Met en minuscules puis met la première lettre de chaque mot en majuscule
   return fixed.toLowerCase().replace(/(^\w|\s\w)/g, (m) => m.toUpperCase());
 }
 
@@ -55,6 +66,35 @@ function norm(s: any): string {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Déduit le niveau de diplôme depuis le titre.
+ * Indispensable pour les filtres de l'interface.
+ */
+function detectNiveau(title: string): string {
+  const t = norm(title);
+
+  // NIVEAU 6 (Bac+3 et plus)
+  if (t.includes("ingenieur") || t.includes("master") || t.includes("doctorat")) return "6";
+  if (t.includes("licence") || t.includes("bachelor") || t.includes("but ") || t.includes("b.u.t")) return "6";
+
+  // NIVEAU 5 (Bac+2)
+  if (t.includes("bts") || t.includes("btsa")) return "5";
+  if (t.includes("dut ")) return "5";
+
+  // NIVEAU 4 (Bac / BP)
+  if (t.includes("bac pro") || t.includes("baccalaureat pro")) return "4";
+  if (t.includes("bp ") || t.includes("brevet pro") || t.includes("bprea")) return "4";
+  if (t.includes("csa ") || t.includes("certificat de specialisation")) return "4";
+  if (t.includes("technicien")) return "4";
+
+  // NIVEAU 3 (CAP / BPA)
+  if (t.includes("cap") || t.includes("capa")) return "3";
+  if (t.includes("bpa ") || t.includes("brevet professionnel agricole")) return "3";
+  if (t.includes("bepa")) return "3";
+
+  return "N/A";
 }
 
 // ----------------------------------------------------------------------
@@ -99,17 +139,17 @@ function getRules(jobLabel: string): RefeaRule | null {
 
 function matchRules(title: string, jobLabel: string): boolean {
   const rules = getRules(jobLabel);
-  if (!rules) return false; // Pas de règle = Pas de résultat (Sécurité)
+  if (!rules) return false; // Sécurité : pas de règle = pas de résultat
 
   const t = norm(title);
 
-  // 1. Interdiction stricte (Le Filtre)
+  // 1. Interdiction stricte
   for (const w of rules.forbidAny ?? []) {
     const ww = norm(w);
     if (ww && t.includes(ww)) return false;
   }
 
-  // 2. Obligation de TOUS les mots (Rare)
+  // 2. Obligation de TOUS les mots
   if (Array.isArray(rules.mustAll) && rules.mustAll.length > 0) {
     for (const w of rules.mustAll) {
       const ww = norm(w);
@@ -117,7 +157,7 @@ function matchRules(title: string, jobLabel: string): boolean {
     }
   }
 
-  // 3. Obligation d'AU MOINS un mot (Le Carburant)
+  // 3. Obligation d'AU MOINS un mot
   if (Array.isArray(rules.mustAny) && rules.mustAny.length > 0) {
     let ok = false;
     for (const w of rules.mustAny) {
@@ -176,7 +216,7 @@ export function searchRefEA(params: {
       return {
         raw: r,
         dist,
-        // On garde la ville brute ici pour le tri éventuel, mais on l'affichera propre plus tard
+        // Ville brute pour le moment
         city: norm(refeaCityOf(r)), 
         title: refeaTitleOf(r) || (r as any).formacertif_libusage || "",
         lat,
@@ -197,14 +237,16 @@ export function searchRefEA(params: {
     .sort((a, b) => a.dist - b.dist)
     .slice(0, limit);
 
-  // Output normalisé avec nettoyage des typos
+  // Output normalisé avec nettoyage complet
   return picked.map((x) => {
     const r = x.raw as any;
 
-    // 🧹 NETTOYAGE DES DONNÉES ICI 🧹
+    // 🧹 NETTOYAGE DES DONNÉES 🧹
     const titrePropre = fixEncoding(r.formacertif_libusage || x.title);
     const organismePropre = fixEncoding(r.uai_libcom || r.uai_libadmin || r.etablissement_niveau_1 || "Établissement");
     const villePropre = formatCity(r.adresse_ville);
+    const niveauDetecte = detectNiveau(titrePropre);
+    const urlPropre = fixUrl(r.site_internet);
 
     return {
       id: makeStableId(x.raw),
@@ -215,12 +257,12 @@ export function searchRefEA(params: {
       lon: x.lon,
       distance_km: Math.round(x.dist * 10) / 10,
       rncp: "Non renseigné",
-      modalite: "Non renseigné",
-      alternance: "Non renseigné",
+      modalite: "Scolaire / Apprentissage", // Valeur par défaut pour l'agricole
+      alternance: "Possible",
       categorie: "Diplôme / Titre (Source officielle RefEA)",
-      site_web: r.site_internet || null,
-      url: r.site_internet || null,
-      niveau: "N/A",
+      site_web: urlPropre,
+      url: urlPropre,
+      niveau: niveauDetecte,
       match: {
         score: 80,
         reasons: ["Formation certifiée Ministère de l'Agriculture"],
