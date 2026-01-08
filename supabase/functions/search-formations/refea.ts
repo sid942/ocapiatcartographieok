@@ -1,66 +1,61 @@
 // supabase/functions/search-formations/refea.ts
-import refeaRaw from "./tableconvert.com_38zydy.json" with { type: "json" };
+import { join } from "https://deno.land/std@0.168.0/path/mod.ts";
 
-export type RefEARow = {
-  formacertif_libusage: string;
-  fil_libusage?: string;
-  adresse_ville?: string;
-  adresse_codepostal?: string;
-  dep_libusage?: string;
-  uai_insee_dep?: string;
-
-  uai_libadmin?: string;
-  uai_libcom?: string;
-  etablissement_niveau_1?: string;
-
+export interface RefEARow {
+  formacertif_libusage?: string; // Titre
+  uai_libcom?: string; // Nom école (1)
+  uai_libadmin?: string; // Nom école (2)
+  etablissement_niveau_1?: string; // Nom école (3)
+  adresse_ville?: string; // Ville
+  latitude?: string | number;
+  longitude?: string | number;
   site_internet?: string;
-  adresse_ligne1?: string;
-
-  latitude?: string;
-  longitude?: string;
-
-  public_apprenti?: string;
-  public_adulte?: string;
-  public_eleve?: string;
-  public_etudiant?: string;
-
   code_formation_maaf?: string;
   code_formation_en?: string;
-};
-
-function norm(s: any) {
-  return (s ?? "")
-    .toString()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['']/g, " ")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Ajoute d'autres champs si ton CSV en a
 }
 
+let cachedData: RefEARow[] | null = null;
+
+/**
+ * Charge les données RefEA depuis le fichier JSON local.
+ * Assure-toi que le fichier s'appelle bien "refea.json" et est dans le même dossier !
+ */
 export function loadRefEA(): RefEARow[] {
-  const arr = Array.isArray(refeaRaw) ? (refeaRaw as RefEARow[]) : [];
-  // On garde uniquement les lignes qui ont un intitulé et une geo exploitable
-  return arr.filter((r) => r?.formacertif_libusage && r?.latitude && r?.longitude);
+  if (cachedData) return cachedData;
+
+  try {
+    // On essaie de lire le fichier refea.json à la racine de la fonction
+    // Note: Si tu utilises un CSV, le code doit être adapté pour parser du CSV.
+    // Ici, je suppose que tu as converti ton CSV en JSON comme vu précédemment.
+    const text = Deno.readTextFileSync(join(Deno.cwd(), "refea.json"));
+    const data = JSON.parse(text);
+    
+    // Sécurité : on s'assure que c'est un tableau
+    cachedData = Array.isArray(data) ? data : [];
+    console.log(`[RefEA] Chargé ${cachedData?.length} lignes.`);
+    return cachedData || [];
+  } catch (e) {
+    console.error("[RefEA] Erreur chargement refea.json :", e);
+    return [];
+  }
 }
 
-export function refeaCityOf(r: RefEARow) {
-  return norm(r.adresse_ville);
-}
-
-export function refeaTitleOf(r: RefEARow) {
-  return norm(r.formacertif_libusage);
-}
-
-export function toNumberOrNull(v: any): number | null {
-  const n = Number(v);
+/**
+ * Convertit une valeur en nombre ou null
+ */
+export function toNumberOrNull(val: any): number | null {
+  if (val === undefined || val === null || val === "") return null;
+  const n = Number(val);
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Calcul de distance GPS (Haversine)
+ * (Déplacé ici pour être partagé)
+ */
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
+  const R = 6371; // Rayon Terre km
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
@@ -68,7 +63,17 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
-
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+}
+
+/**
+ * Helpers pour extraire ville / titre proprement
+ */
+export function refeaCityOf(r: RefEARow): string {
+  return r.adresse_ville ?? "";
+}
+
+export function refeaTitleOf(r: RefEARow): string {
+  return r.formacertif_libusage ?? "";
 }
