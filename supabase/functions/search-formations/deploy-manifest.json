@@ -1,0 +1,13 @@
+{
+  "files": [
+    "index.ts",
+    "perplexity_enrich.ts",
+    "refea.ts",
+    "refea.json",
+    "refeaRules.ts",
+    "refeaSearch.ts",
+    "trainingCatalog.ts",
+    "trainingMatch.ts",
+    "trainingWhitelist.ts"
+  ]
+}

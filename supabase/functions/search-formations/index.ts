@@ -697,9 +697,7 @@ Deno.serve(async (req: Request) => {
     // 1) RefEA (source officielle) + WHITELIST EXCEL
     // ==================================================================================
     // ✅ TEMPORAIRE : RefEA OFF (évite timeout / bundle trop lourd)
-let refeaResults: any[] = [];
-
-    }
+    let refeaResults: any[] = [];
 
     // ✅ Whitelist catalogue Excel (RefEA)
     const refeaWhitelisted = filterByTrainingWhitelist(
