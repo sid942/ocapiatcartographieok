@@ -7,17 +7,20 @@ import {
   haversineKm,
   type RefEARow,
 } from "./refea.ts";
-import { REFEA_RULES } from "./refeaRules.ts";
+import { REFEA_RULES, type RefeaRule } from "./refeaRules.ts";
 
 /**
  * RefEA Search (offline dataset)
- * ✅ Filtrage métier strict via refeaRules.ts
- * ✅ Anti "collège / 4e / 3e / orientation" (anti bruit RefEA)
- * ✅ Fix encodage, URLs, niveaux, IDs stables
+ * ✅ ULTRA PROPRE / ZÉRO HORS-SUJET
+ * - Filtrage métier strict via refeaRules.ts (obligatoire)
+ * - Fix encodage (LycÃ©e -> Lycée)
+ * - URL normalisée
+ * - Niveau détecté (3/4/5/6)
+ * - Dédup stable
  */
 
 // ----------------------------------------------------------------------
-// 1) TEXT UTILS (norm, encoding, url)
+// 1) TEXT UTILS
 // ----------------------------------------------------------------------
 
 function norm(s: any): string {
@@ -33,220 +36,163 @@ function norm(s: any): string {
 }
 
 /**
- * Répare les chaines mal encodées (cas typique "OpÃ©rateur").
- * Remarque : ce fix est volontairement conservateur.
+ * Fix strings like "LycÃ©e" -> "Lycée"
+ * (typical mojibake: UTF-8 bytes interpreted as Latin-1)
  */
-function fixEncoding(str: string | null | undefined): string {
-  if (!str) return "";
-  // Si déjà clean, ne pas toucher
-  if (!/[ÃÂ�]/.test(str)) return str;
+function fixEncoding(s: string | null | undefined): string {
+  if (!s) return "";
+  // quick escape: already looks fine
+  if (!/[ÃÂ�]/.test(s)) return s;
+
   try {
-    const bytes = new Uint8Array(str.length);
-    for (let i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i) & 0xff;
-    // latin1 -> utf8 est souvent le bon sens pour corriger "Ã©"
-    return new TextDecoder("utf-8").decode(bytes);
+    // reinterpret each char code as a byte
+    const bytes = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+    // latin1 decode is the typical repair for mojibake
+    return new TextDecoder("latin1").decode(bytes);
   } catch {
-    return str;
+    return s;
   }
+}
+
+function formatCity(s: string | null | undefined): string {
+  const fixed = fixEncoding(s);
+  const clean = fixed.trim();
+  if (!clean) return "";
+  return clean
+    .toLowerCase()
+    .replace(/(^\w|[\s-]\w)/g, (m) => m.toUpperCase())
+    .replace(/\bCedex\b/g, "CEDEX");
 }
 
 function fixUrl(url: string | null | undefined): string | null {
   if (!url) return null;
-  let u = url.trim();
-  if (u.length < 4) return null;
-  // évite les valeurs "N/A", "non renseigne", etc.
-  const n = norm(u);
-  if (n === "na" || n.includes("non renseigne") || n === "null") return null;
-  if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://" + u;
+  let u = fixEncoding(url).trim();
+  if (!u || u.length < 4) return null;
+
+  // ignore non-web
+  if (u.startsWith("mailto:") || u.startsWith("tel:")) return null;
+
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
   return u;
 }
 
-/**
- * "SAINT GENIS LAVAL" -> "Saint Genis Laval"
- */
-function formatCity(str: string | null | undefined): string {
-  const fixed = fixEncoding(str);
-  if (!fixed) return "";
-  return fixed
-    .toLowerCase()
-    .replace(/(^\w|\s\w)/g, (m) => m.toUpperCase());
-}
-
 // ----------------------------------------------------------------------
-// 2) ANTI-JUNK RefEA (collège/orientation/etc.)
-// ----------------------------------------------------------------------
-
-function isSchoolJunkTitle(title: string): boolean {
-  const t = norm(title);
-  // Bruit très fréquent dans RefEA
-  const banned = [
-    "cycle orientation",
-    "college",
-    "collège",
-    "classe de 4",
-    "classe de 3",
-    "4eme",
-    "4ème",
-    "3eme",
-    "3ème",
-    "enseignement agricole classe",
-    "cycle orientation college",
-    "cycle d orientation",
-    "cycle d orientation college",
-  ];
-  return banned.some((k) => t.includes(norm(k)));
-}
-
-// Optionnel : si tu veux virer aussi les entrées "orientation/college" qui contiennent juste "cycle"
-function isSchoolJunkRow(r: any): boolean {
-  const title = (r?.formacertif_libusage ?? "") as string;
-  const other = `${r?.intitule ?? ""} ${r?.libelle ?? ""}`;
-  return isSchoolJunkTitle(title) || isSchoolJunkTitle(other);
-}
-
-// ----------------------------------------------------------------------
-// 3) NIVEAU (pour filtre UI)
+// 2) NIVEAU (3/4/5/6) FROM TITLE
 // ----------------------------------------------------------------------
 
 function detectNiveau(title: string): string {
   const t = norm(title);
 
-  // Niv 6 (Bac+3 et +)
-  if (
-    t.includes("ingenieur") ||
-    t.includes("ingénieur") ||
-    t.includes("master") ||
-    t.includes("doctorat") ||
-    t.includes("licence") ||
-    t.includes("bachelor") ||
-    t.includes("but ") ||
-    t.includes("b u t")
-  ) return "6";
+  // Niveau 6+
+  if (t.includes("master") || t.includes("ingenieur") || t.includes("ingénieur") || t.includes("doctorat")) return "6";
+  if (t.includes("licence") || t.includes("bachelor") || t.includes("but ") || t.includes("b u t") || t.includes("b.u.t")) return "6";
 
-  // Niv 5 (Bac+2)
+  // Niveau 5
   if (t.includes("btsa") || t.includes("bts") || t.includes("dut")) return "5";
 
-  // Niv 4 (Bac / BP / CS souvent post-bac mais on garde 4 ici pour l’UI)
-  if (t.includes("bac pro") || t.includes("baccalaureat pro") || t.includes("baccalaureat professionnel")) return "4";
+  // Niveau 4
+  if (t.includes("bac pro") || t.includes("baccalaureat professionnel") || t.includes("baccalauréat professionnel")) return "4";
   if (t.includes("bp ") || t.includes("brevet professionnel") || t.includes("bprea")) return "4";
-  if (t.includes("csa ") || t.includes("certificat de specialisation") || t.startsWith("cs ")) return "4";
-  if (t.includes("technicien")) return "4";
+  if (t.includes("csa") || t.includes("certificat de specialisation") || t.includes("certificat de spécialisation")) return "4";
 
-  // Niv 3 (CAP / CAPA / BPA / BEPA)
-  if (t.includes("capa") || (t.includes("cap") && !t.includes("capacit"))) return "3";
-  if (t.includes("bpa ") || t.includes("brevet professionnel agricole") || t.includes("bepa")) return "3";
+  // Niveau 3
+  if (t.includes("capa") || (t.includes("cap") && !t.includes("capitaine"))) return "3";
+  if (t.includes("bpa") || t.includes("bepa") || t.includes("bep")) return "3";
 
   return "N/A";
 }
 
 // ----------------------------------------------------------------------
-// 4) RULES (RefEA rules.ts)
+// 3) RULES (OBLIGATOIRES)
 // ----------------------------------------------------------------------
 
-type RefeaRule = {
-  mustAny: string[];
-  mustAll?: string[];
-  forbidAny: string[];
-};
-
-function ruleKey(jobLabel: string): string {
-  const k = norm(jobLabel);
-
-  if (k.includes("responsable") && k.includes("silo")) return "responsable de silo";
-  if (k.includes("agent") && k.includes("silo")) return "agent de silo";
-  if (k.includes("silo")) return "agent de silo";
-
-  if (k.includes("chauffeur") || k.includes("conduite")) return "chauffeur agricole";
-
-  if ((k.includes("services") && k.includes("tech")) || k.includes("maintenance")) return "responsable services techniques";
-
-  if (k.includes("magasinier") || k.includes("cariste")) return "magasinier cariste";
-  if (k.includes("logistique")) return "responsable logistique";
-
-  if (k.includes("agreeur") || k.includes("agréeur")) return "agreeur";
-  if (k.includes("qualite") || k.includes("qualité")) return "controleur qualite";
-
-  if (k.includes("conducteur") && k.includes("ligne")) return "conducteur de ligne";
-
-  if (k.includes("technicien") && k.includes("culture")) return "technicien culture";
-  if (k.includes("culture") || k.includes("agronomie")) return "technicien culture";
-
-  if (k.includes("export")) return "commercial export";
-
-  if (k.includes("technico")) return "technico commercial";
-  if (k.includes("commercial")) return "technico commercial";
-
-  return k;
-}
-
-function getRules(jobLabel: string): RefeaRule | null {
-  // On préfère la clé normalisée, car REFEA_RULES est défini avec libellés humains
-  const key = ruleKey(jobLabel);
-  const direct = (REFEA_RULES as any)[jobLabel] as RefeaRule | undefined;
+function getRulesStrict(jobLabel: string): RefeaRule | null {
+  // compat: le index.ts envoie config.label ("Technico-commercial")
+  // refeaRules.ts fournit aussi des alias par label => REFEA_RULES[jobLabel] marche.
+  const direct = REFEA_RULES[jobLabel];
   if (direct) return direct;
-  const byKey = (REFEA_RULES as any)[key] as RefeaRule | undefined;
-  if (byKey) return byKey;
-  return null;
+
+  // sinon fallback sur normalisation simple (au cas où)
+  const k = norm(jobLabel);
+  const alt =
+    REFEA_RULES[k] ||
+    (k.includes("responsable") && k.includes("silo") ? REFEA_RULES["responsable_silo"] : undefined) ||
+    (k.includes("silo") ? REFEA_RULES["silo"] : undefined) ||
+    (k.includes("chauffeur") ? REFEA_RULES["chauffeur"] : undefined) ||
+    (k.includes("technico") ? REFEA_RULES["technico"] : undefined) ||
+    (k.includes("export") ? REFEA_RULES["commercial_export"] : undefined) ||
+    (k.includes("logistique") ? REFEA_RULES["responsable_logistique"] : undefined) ||
+    ((k.includes("magasinier") || k.includes("cariste")) ? REFEA_RULES["magasinier_cariste"] : undefined) ||
+    (k.includes("qualite") ? REFEA_RULES["controleur_qualite"] : undefined) ||
+    (k.includes("agreeur") ? REFEA_RULES["agreeur"] : undefined) ||
+    (k.includes("conducteur") && k.includes("ligne") ? REFEA_RULES["conducteur_ligne"] : undefined) ||
+    (k.includes("technicien") && k.includes("culture") ? REFEA_RULES["technicien_culture"] : undefined) ||
+    undefined;
+
+  return alt ?? null;
 }
 
-function matchRules(title: string, jobLabel: string): boolean {
-  const rules = getRules(jobLabel);
-  // Sécurité : si pas de règle -> on n'affiche rien (sinon RefEA devient trop permissif)
-  if (!rules) return false;
-
+function matchRulesStrict(title: string, rule: RefeaRule): boolean {
   const t = norm(title);
 
-  // forbidAny
-  for (const w of rules.forbidAny ?? []) {
+  // forbidAny => reject
+  for (const w of rule.forbidAny ?? []) {
     const ww = norm(w);
     if (ww && t.includes(ww)) return false;
   }
 
   // mustAll
-  if (Array.isArray(rules.mustAll) && rules.mustAll.length > 0) {
-    for (const w of rules.mustAll) {
+  if (Array.isArray(rule.mustAll) && rule.mustAll.length > 0) {
+    for (const w of rule.mustAll) {
       const ww = norm(w);
       if (ww && !t.includes(ww)) return false;
     }
   }
 
-  // mustAny
-  if (Array.isArray(rules.mustAny) && rules.mustAny.length > 0) {
-    let ok = false;
-    for (const w of rules.mustAny) {
+  // mustAny (at least 1)
+  if (Array.isArray(rule.mustAny) && rule.mustAny.length > 0) {
+    for (const w of rule.mustAny) {
       const ww = norm(w);
-      if (ww && t.includes(ww)) {
-        ok = true;
-        break;
-      }
+      if (ww && t.includes(ww)) return true;
     }
-    if (!ok) return false;
+    return false;
   }
 
-  return true;
+  // safety: if no mustAny => refuse (ultra strict)
+  return false;
 }
 
 // ----------------------------------------------------------------------
-// 5) SAFE GEO + ID
+// 4) COORDS + ID + DEDUP
 // ----------------------------------------------------------------------
 
-function safeFloat(n: any): number | null {
-  const x = toNumberOrNull(n);
+function safeFloat(v: any): number | null {
+  const x = toNumberOrNull(v);
   if (x === null) return null;
   if (!Number.isFinite(x)) return null;
   return x;
 }
 
-function makeStableId(r: RefEARow): string {
-  const anyr = r as any;
+function stableId(r: RefEARow): string {
+  const anyr: any = r as any;
   const code = anyr.code_formation_maaf || anyr.code_formation_en;
   if (code) return `refea_${code}`;
-  // fallback stable-ish
-  return `refea_${norm(anyr.formacertif_libusage)}_${norm(anyr.adresse_ville)}_${anyr.latitude ?? ""}_${anyr.longitude ?? ""}`;
+
+  // fallback stable (hash-like key)
+  const a = norm(anyr.formacertif_libusage);
+  const b = norm(anyr.uai_libcom || anyr.uai_libadmin || anyr.etablissement_niveau_1);
+  const c = norm(anyr.adresse_ville);
+  const d = `${anyr.latitude ?? ""}_${anyr.longitude ?? ""}`;
+  return `refea_${a}_${b}_${c}_${d}`.slice(0, 220);
+}
+
+function dedupKey(intitule: string, organisme: string, ville: string): string {
+  return `${norm(intitule)}|${norm(organisme)}|${norm(ville)}`;
 }
 
 // ----------------------------------------------------------------------
-// 6) MAIN
+// 5) MAIN
 // ----------------------------------------------------------------------
 
 export function searchRefEA(params: {
@@ -257,78 +203,96 @@ export function searchRefEA(params: {
   radiusKm: number;
   limit?: number;
 }) {
-  const { jobLabel, ville, userLat, userLon, radiusKm, limit = 30 } = params;
+  const { jobLabel, userLat, userLon, radiusKm, limit = 30 } = params;
 
-  const cityWanted = norm(ville);
+  // RULES ARE MANDATORY
+  const rules = getRulesStrict(jobLabel);
+  if (!rules) return [];
+
   const rows = loadRefEA();
 
-  const mapped = rows
-    // 1) Anti bruit scolaire (RefEA)
-    .filter((r: any) => !isSchoolJunkRow(r))
-    // 2) Rules métier
-    .filter((r: any) => matchRules((r as any).formacertif_libusage ?? "", jobLabel))
-    // 3) Map + distance
-    .map((r: any) => {
-      const lat = safeFloat(r.latitude);
-      const lon = safeFloat(r.longitude);
+  const candidates = rows
+    .map((r) => {
+      const anyr: any = r as any;
+
+      const titleRaw = (refeaTitleOf(r) || anyr.formacertif_libusage || "").toString();
+      const title = fixEncoding(titleRaw);
+
+      // métier strict
+      if (!matchRulesStrict(title, rules)) return null;
+
+      const lat = safeFloat(anyr.latitude);
+      const lon = safeFloat(anyr.longitude);
       if (lat === null || lon === null) return null;
 
       const dist = haversineKm(userLat, userLon, lat, lon);
       if (dist > radiusKm) return null;
 
-      const city = norm(refeaCityOf(r as RefEARow) || r.adresse_ville || "");
-      const title = refeaTitleOf(r as RefEARow) || r.formacertif_libusage || "";
+      const org = fixEncoding(anyr.uai_libcom || anyr.uai_libadmin || anyr.etablissement_niveau_1 || "Établissement");
+      const city = formatCity(anyr.adresse_ville || refeaCityOf(r) || "");
 
-      return { raw: r as RefEARow, dist, city, title, lat, lon };
+      const url = fixUrl(anyr.site_internet);
+
+      return {
+        raw: r,
+        id: stableId(r),
+        title,
+        org,
+        city,
+        lat,
+        lon,
+        dist,
+        url,
+        niveau: detectNiveau(title),
+      };
     })
     .filter(Boolean) as Array<{
-      raw: RefEARow;
-      dist: number;
-      city: string;
-      title: string;
-      lat: number;
-      lon: number;
-    }>;
+    raw: RefEARow;
+    id: string;
+    title: string;
+    org: string;
+    city: string;
+    lat: number;
+    lon: number;
+    dist: number;
+    url: string | null;
+    niveau: string;
+  }>;
 
-  // 4) Soft city bias: si on a des résultats dans la même ville, on ne garde que ceux-là
-  const inSameCity = mapped.filter((x) => x.city === cityWanted);
-  const pool = inSameCity.length > 0 ? inSameCity : mapped;
+  // sort by distance
+  candidates.sort((a, b) => a.dist - b.dist);
 
-  // 5) Tri + limit
-  const picked = pool.sort((a, b) => a.dist - b.dist).slice(0, limit);
+  // dedup internal
+  const seen = new Set<string>();
+  const uniq: typeof candidates = [];
+  for (const c of candidates) {
+    const k = dedupKey(c.title, c.org, c.city);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    uniq.push(c);
+    if (uniq.length >= limit) break;
+  }
 
-  // 6) Output normalisé
-  return picked.map((x) => {
-    const r = x.raw as any;
-
-    const titrePropre = fixEncoding(r.formacertif_libusage || x.title) || "Formation";
-    const organismePropre =
-      fixEncoding(r.uai_libcom || r.uai_libadmin || r.etablissement_niveau_1) || "Établissement";
-    const villePropre = formatCity(r.adresse_ville || refeaCityOf(x.raw) || "");
-    const niveauDetecte = detectNiveau(titrePropre);
-
-    const urlPropre = fixUrl(r.site_internet);
-
-    return {
-      id: makeStableId(x.raw),
-      intitule: titrePropre,
-      organisme: organismePropre,
-      ville: villePropre,
-      lat: x.lat,
-      lon: x.lon,
-      distance_km: Math.round(x.dist * 10) / 10,
-      rncp: "Non renseigné",
-      modalite: "Non renseigné",
-      alternance: "Non renseigné",
-      categorie: "Diplôme / Titre (Source officielle RefEA)",
-      site_web: urlPropre,
-      url: urlPropre,
-      niveau: niveauDetecte,
-      match: {
-        score: 80,
-        reasons: ["Formation issue de la source officielle (RefEA)"],
-      },
-      _source: "refea",
-    };
-  });
+  // map output format identical to LBA to merge properly
+  return uniq.map((x) => ({
+    id: x.id,
+    intitule: x.title || "Formation",
+    organisme: x.org,
+    ville: x.city,
+    lat: x.lat,
+    lon: x.lon,
+    distance_km: Math.round(x.dist * 10) / 10,
+    rncp: "Non renseigné",
+    modalite: "Non renseigné",
+    alternance: "Non renseigné",
+    categorie: "Diplôme / Titre (Source officielle RefEA)",
+    site_web: x.url,
+    url: x.url,
+    niveau: x.niveau,
+    match: {
+      score: 80,
+      reasons: ["Formation issue de la source officielle (RefEA)"],
+    },
+    _source: "refea",
+  }));
 }
