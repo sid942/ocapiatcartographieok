@@ -691,6 +691,9 @@ function detectJobKey(inputMetier: any): string {
 
   // alias directs (les + importants)
   const alias: Record<string, string> = {
+    "silo": "silo",
+"chauffeur": "chauffeur",
+"responsable_silo": "responsable_silo",
     "technico-commercial": "technico",
     "technico commercial": "technico",
     "technico": "technico",
