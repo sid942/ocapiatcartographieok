@@ -247,12 +247,14 @@ const HARD_RULES_BY_JOB: Record<string, HardRules> = {
 
   silo: {
     // Élargi pour inclure l'agroalimentaire et la transformation (comme RefEA)
-    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "tri", "reception", "expedition", "élévateur", "elevateur", "industries agroalimentaires", "bio industries", "conduite de systemes industriels", "transformation", "grandes cultures"],
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "tri", "reception", "expedition", "élévateur", "elevateur", "industries agroalimentaires", "bio industries", "conduite de systemes industriels", "transformation", "grandes cultures", "cgea", "agricole", "polyvalent"],
+    // PAS d'interdiction "environnement" ici
     must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
   },
 
   responsable_silo: {
-    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "qualite", "qualité", "reception", "expedition", "stocks", "industries agroalimentaires", "management"],
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "qualite", "qualité", "reception", "expedition", "stocks", "industries agroalimentaires", "management", "chef de silo"],
+    // PAS d'interdiction "environnement" ici
     must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
   },
 
@@ -292,6 +294,8 @@ const HARD_RULES_BY_JOB: Record<string, HardRules> = {
 
   technico: {
     must_any: ["technico", "agrofourniture", "semences", "intrants", "engrais", "phytosanitaire", "nutrition animale", "cooperative", "négoce", "negoce"],
+    // BAN du "Service aux personnes"
+    must_none: ["service aux personnes", "services aux personnes", "sapver", "aide a la personne"],
   },
 
   commercial_export: {
