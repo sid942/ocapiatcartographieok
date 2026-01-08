@@ -1,6 +1,9 @@
 // supabase/functions/search-formations/index.ts
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+import { searchRefEA } from "./refeaSearch.ts";
+import { filterByTrainingWhitelist } from "./trainingMatch.ts";
+
 import {
   fetchPerplexityFormations,
   shouldEnrichWithPerplexity,
@@ -8,12 +11,10 @@ import {
   type PerplexityFormationInput,
 } from "./perplexity_enrich.ts";
 
-import { searchRefEA } from "./refeaSearch.ts";
-
 // ==================================================================================
 // CORS
 // ==================================================================================
-const corsHeaders = {
+const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
@@ -39,9 +40,9 @@ interface JobProfile {
   banned_phrases: string[];
   context_keywords?: string[];
   min_score: number;
+  relaxed_min_score?: number;
   target_min_results: number;
   max_extra_radius_km: number;
-  relaxed_min_score?: number;
   max_results?: number;
   soft_distance_cap_km?: number;
   hard_distance_cap_km?: number;
@@ -50,7 +51,7 @@ interface JobProfile {
 const DEBUG = false;
 const FETCH_TIMEOUT_MS = 10_000;
 
-// Score constants
+// Scoring constants
 const ABSOLUTE_MIN_SCORE = 10;
 const MAX_WHY_REASONS = 3;
 
@@ -78,7 +79,7 @@ function cleanText(text: string | null | undefined): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['']/g, " ")
+    .replace(/[’']/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -114,8 +115,27 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * c;
 }
 
+function toFiniteNumber(x: any): number | null {
+  const n = typeof x === "string" ? Number(x) : x;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+function inferNiveauFromText(title: string): string {
+  const t = cleanText(title);
+  if (t.includes("master") || t.includes("ingenieur") || t.includes("ingénieur") || t.includes("doctorat")) return "6";
+  if (t.includes("licence") || t.includes("bachelor") || t.includes("but ") || t.includes("b u t")) return "6";
+  if (t.includes("bts") || t.includes("btsa") || t.includes("dut")) return "5";
+  if (t.includes("bac pro") || t.includes("baccalaureat pro") || t.includes("brevet pro") || t.includes("bp ")) return "4";
+  if (t.includes("cap") || t.includes("capa") || t.includes("bpa") || t.includes("bepa")) return "3";
+  return "N/A";
+}
+
 // ==================================================================================
-// JOB PROFILES
+// JOB PROFILES (les tiens)
 // ==================================================================================
 const JOB_PROFILES: Record<string, JobProfile> = {
   technico: {
@@ -132,6 +152,8 @@ const JOB_PROFILES: Record<string, JobProfile> = {
       "négociateur",
       "conseil vente",
       "vente conseil",
+      "conseil et commercialisation",
+      "solutions techniques",
     ],
     synonyms: [
       "agrofourniture",
@@ -144,6 +166,10 @@ const JOB_PROFILES: Record<string, JobProfile> = {
       "coopérative",
       "negoce agricole",
       "négoce agricole",
+      "biens services pour l agriculture",
+      // IMPORTANT: on garde mais ça ne doit PAS suffire sans whitelist
+      "alimentation et boissons",
+      "distribution agricole",
     ],
     weak_keywords: ["commerce", "vente", "commercial"],
     context_keywords: ["agricole", "agri", "agriculture", "agroalimentaire", "alimentaire", "distribution"],
@@ -245,7 +271,6 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     hard_distance_cap_km: 300,
   },
 
-  // ✅ FIX IMPORTANT : "conduite" ne doit PAS être un strong_keyword (trop générique)
   chauffeur: {
     key: "chauffeur",
     label: "Chauffeur agricole",
@@ -266,7 +291,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
       "pulvérisateur",
     ],
     synonyms: ["recolte", "récolte", "benne", "remorque"],
-    weak_keywords: ["conduite"], // ✅ "faible" uniquement
+    weak_keywords: ["conduite"], // faible
     context_keywords: ["cgea", "grandes cultures"],
     banned_keywords: ["taxi", "vtc", "bus", "autocar", "voyageurs", "btp", "travaux publics", "routier", "poids lourd"],
     banned_phrases: ["transport de personnes", "transport routier"],
@@ -420,7 +445,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
 };
 
 // ==================================================================================
-// SCORING
+// SCORING (LBA)
 // ==================================================================================
 function computeMatchScore(
   intitule: string,
@@ -434,19 +459,15 @@ function computeMatchScore(
 
   const minScore = phase === "strict" ? config.min_score : (config.relaxed_min_score ?? config.min_score);
 
-  // Banned check
+  // 1) BAN
   for (const banned of config.banned_keywords) {
-    if (includesWord(text, banned)) {
-      return { score: 0, reasons: ["Contenu non pertinent"] };
-    }
+    if (includesWord(text, banned)) return { score: 0, reasons: ["Contenu non pertinent"] };
   }
   for (const phrase of config.banned_phrases) {
-    if (includesPhrase(text, phrase)) {
-      return { score: 0, reasons: ["Contenu non pertinent"] };
-    }
+    if (includesPhrase(text, phrase)) return { score: 0, reasons: ["Contenu non pertinent"] };
   }
 
-  // Strong keywords
+  // 2) STRONG
   let strongMatches = 0;
   for (const kw of config.strong_keywords) {
     if (includesWord(text, kw)) {
@@ -456,7 +477,7 @@ function computeMatchScore(
   }
   if (strongMatches > 0) reasons.push(`Correspond au métier recherché (${strongMatches} critères)`);
 
-  // Synonyms
+  // 3) SYN
   let synonymMatches = 0;
   for (const syn of config.synonyms) {
     if (includesWord(text, syn)) {
@@ -466,14 +487,14 @@ function computeMatchScore(
   }
   if (synonymMatches > 0) reasons.push(`Domaine proche (${synonymMatches} éléments)`);
 
-  // Context keywords
-  if (config.context_keywords && config.context_keywords.length > 0) {
+  // 4) CONTEXT
+  if (config.context_keywords?.length) {
     for (const ctx of config.context_keywords) {
       if (includesWord(text, ctx)) score += 3;
     }
   }
 
-  // Weak keywords (phase relaxed)
+  // 5) WEAK (relaxed/fallback only)
   if (phase !== "strict") {
     for (const weak of config.weak_keywords) {
       if (includesWord(text, weak)) score += 2;
@@ -481,7 +502,6 @@ function computeMatchScore(
   }
 
   if (score < minScore) return { score: 0, reasons: [] };
-
   return { score: Math.min(score, 100), reasons: reasons.slice(0, MAX_WHY_REASONS) };
 }
 
@@ -491,6 +511,59 @@ function applyDistanceBonus(baseScore: number, distanceKm: number, config: JobPr
 
   const penalty = Math.floor((distanceKm - softCap) / 50) * 2;
   return Math.max(baseScore - penalty, ABSOLUTE_MIN_SCORE);
+}
+
+// ==================================================================================
+// GEOCODING (fallback si front n'envoie pas lat/lon)
+// ==================================================================================
+async function geocodeCity(ville: string): Promise<{ lat: number; lon: number; score: number; type: string } | null> {
+  const q = ville.trim();
+  if (!q) return null;
+
+  const url =
+    `https://nominatim.openstreetmap.org/search?` +
+    `q=${encodeURIComponent(q)}` +
+    `&format=json&addressdetails=1&limit=5`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent": "ocapiat-search/1.0 (supabase edge function)",
+        "Accept": "application/json",
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    if (!res.ok) return null;
+
+    const arr = (await res.json().catch(() => null)) as any[] | null;
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+
+    // Pick best (highest importance, then place_rank)
+    const best = [...arr].sort((a, b) => {
+      const ia = toFiniteNumber(a?.importance) ?? 0;
+      const ib = toFiniteNumber(b?.importance) ?? 0;
+      if (ib !== ia) return ib - ia;
+      const ra = toFiniteNumber(a?.place_rank) ?? 0;
+      const rb = toFiniteNumber(b?.place_rank) ?? 0;
+      return rb - ra;
+    })[0];
+
+    const lat = toFiniteNumber(best?.lat);
+    const lon = toFiniteNumber(best?.lon);
+    if (lat === null || lon === null) return null;
+
+    const score = Math.max(0, Math.min(1, toFiniteNumber(best?.importance) ?? 0.5));
+    const type = String(best?.type ?? best?.class ?? "nominatim");
+    return { lat, lon, score, type };
+  } catch {
+    return null;
+  }
 }
 
 // ==================================================================================
@@ -534,7 +607,6 @@ async function fetchLBA(params: {
 
     const data = await res.json().catch(() => null);
 
-    // ✅ robust parsing (API variants)
     const results =
       (data && Array.isArray(data.results) && data.results) ||
       (data && Array.isArray(data.formations) && data.formations) ||
@@ -542,7 +614,6 @@ async function fetchLBA(params: {
       [];
 
     if (DEBUG) console.log(`[LBA] Received ${results.length} results`);
-
     return Array.isArray(results) ? results : [];
   } catch (err: any) {
     console.error("[LBA] Fetch error:", err?.message ?? String(err));
@@ -559,11 +630,19 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { metier, ville, lat, lon, niveau, mode } = await req.json();
+    const body = await req.json().catch(() => ({} as any));
+    const metier = String(body?.metier ?? "").trim(); // key du métier (ex: technico, silo...)
+    const ville = String(body?.ville ?? "").trim();
+    const niveauFiltre: NiveauFiltre = (body?.niveau ?? "all") as NiveauFiltre;
+    const searchMode: Mode = (body?.mode ?? "strict+relaxed+fallback_rome") as Mode;
 
-    if (!metier || !ville || typeof lat !== "number" || typeof lon !== "number") {
+    // lat/lon facultatifs (si ton front les envoie un jour, on les utilise)
+    const latFromReq = toFiniteNumber(body?.lat);
+    const lonFromReq = toFiniteNumber(body?.lon);
+
+    if (!metier || !ville) {
       return new Response(
-        JSON.stringify({ error: "Paramètres manquants: metier, ville, lat, lon requis" }),
+        JSON.stringify({ error: "Paramètres manquants: metier, ville requis" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -576,76 +655,106 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const niveauFiltre: NiveauFiltre = niveau || "all";
-    const searchMode: Mode = mode || "strict+relaxed+fallback_rome";
+    // --- GEO ---
+    let userLat = latFromReq;
+    let userLon = lonFromReq;
 
-    const globalMaxResults = config.max_results ?? GLOBAL_MAX_RESULTS_DEFAULT;
+    const warnings: any = {};
+    const debug: any = DEBUG
+      ? {
+          metier_key: metier,
+          ville_in: ville,
+          phases: [] as Phase[],
+          lba_requests: [] as any[],
+          sources: { refea: 0, lba: 0, perplexity: 0 },
+          geo: { used: false, score: null as number | null, type: null as string | null },
+        }
+      : undefined;
+
+    if (userLat === null || userLon === null) {
+      const geo = await geocodeCity(ville);
+      if (!geo) {
+        return new Response(
+          JSON.stringify({ error: "Impossible de géocoder la ville. Essaie une ville plus précise." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      userLat = geo.lat;
+      userLon = geo.lon;
+      warnings.geocode_score = geo.score;
+      warnings.geocode_type = geo.type;
+      if (DEBUG && debug) {
+        debug.geo = { used: true, score: geo.score, type: geo.type };
+      }
+    }
 
     // Pour affichage UI
     let appliedRadiusKm = config.radius_km;
 
-    // ===== PHASE 1: RefEA (source officielle) =====
+    const globalMaxResults = config.max_results ?? GLOBAL_MAX_RESULTS_DEFAULT;
+
+    // ==================================================================================
+    // 1) RefEA (source officielle) + WHITELIST EXCEL
+    // ==================================================================================
     let refeaResults: any[] = [];
     try {
       const refeaRadius = Math.min(config.radius_km + 50, 200);
       refeaResults = searchRefEA({
-        jobLabel: config.label,
+        jobLabel: config.label, // ruleKey() dans refeaSearch gère
         ville,
-        userLat: lat,
-        userLon: lon,
+        userLat: userLat!,
+        userLon: userLon!,
         radiusKm: refeaRadius,
         limit: REFEA_MAX,
       });
     } catch (e) {
       console.error("[RefEA] Error:", e);
+      refeaResults = [];
     }
 
-    // ===== PHASE 2: LBA (API externe) =====
-    let allFormations: any[] = [];
+    // ✅ Whitelist catalogue Excel (RefEA)
+    const refeaWhitelisted = filterByTrainingWhitelist(
+      config.key,
+      refeaResults,
+      (f: any) => String(f?.intitule ?? ""),
+    );
+
+    // ==================================================================================
+    // 2) LBA (API) + scoring + WHITELIST EXCEL
+    // ==================================================================================
+    let lbaFormations: any[] = [];
+
     const phases: Phase[] = [];
     if (searchMode.includes("strict")) phases.push("strict");
     if (searchMode.includes("relaxed")) phases.push("relaxed");
     if (searchMode.includes("fallback_rome")) phases.push("fallback");
 
-    // Warnings / debug utiles
-    const warnings: any = {};
-    const debug: any = {
-      phases,
-      lba_requests: [] as any[],
-      sources: {
-        refea: refeaResults.length,
-        lba: 0,
-        perplexity: 0,
-      },
-    };
+    if (DEBUG && debug) debug.phases = phases;
 
     for (const phase of phases) {
       const romes = phase === "fallback" ? (config.fallback_romes ?? config.romes) : config.romes;
       const currentRadius = phase === "strict" ? config.radius_km : config.radius_km + config.max_extra_radius_km;
-
       appliedRadiusKm = Math.max(appliedRadiusKm, currentRadius);
 
-      debug.lba_requests.push({ phase, romes, radius: currentRadius });
+      if (DEBUG && debug) debug.lba_requests.push({ phase, romes, radius: currentRadius });
 
       const lbaRaw = await fetchLBA({
         romes,
-        latitude: lat,
-        longitude: lon,
+        latitude: userLat!,
+        longitude: userLon!,
         radius: currentRadius,
         caller: "ocapiat",
       });
 
       for (const item of lbaRaw) {
-        const intitule = item?.title || item?.intitule || "";
-        const organisme = item?.company?.name || item?.organisme || "";
+        const intitule = String(item?.title || item?.intitule || "");
+        const organisme = String(item?.company?.name || item?.organisme || "");
 
-        const itemLat = item?.place?.latitude ?? item?.lat;
-        const itemLon = item?.place?.longitude ?? item?.lon;
+        const itemLat = toFiniteNumber(item?.place?.latitude ?? item?.lat);
+        const itemLon = toFiniteNumber(item?.place?.longitude ?? item?.lon);
+        if (itemLat === null || itemLon === null) continue;
 
-        if (typeof itemLat !== "number" || typeof itemLon !== "number") continue;
-
-        const distance = haversineKm(lat, lon, itemLat, itemLon);
-
+        const distance = haversineKm(userLat!, userLon!, itemLat, itemLon);
         const hardCap = config.hard_distance_cap_km ?? 500;
         if (distance > hardCap) continue;
 
@@ -655,45 +764,69 @@ Deno.serve(async (req: Request) => {
         const finalScore = applyDistanceBonus(baseScore, distance, config);
         if (finalScore < ABSOLUTE_MIN_SCORE) continue;
 
-        const niv = item?.diploma?.level?.toString() || "N/A";
-        if (niveauFiltre !== "all" && niv !== niveauFiltre && niv !== "N/A") continue;
+        // Niveau
+        const niv =
+          String(item?.diploma?.level ?? "").trim() ||
+          inferNiveauFromText(intitule) ||
+          "N/A";
 
-        allFormations.push({
-          id: item?.id || `lba_${Math.random().toString(36).slice(2)}`,
+        // Filtre niveau (après scoring)
+        if (niveauFiltre !== "all") {
+          if (niv === "N/A") continue;
+          if (niv !== niveauFiltre) continue;
+        }
+
+        lbaFormations.push({
+          id: item?.id || `lba_${crypto.randomUUID()}`,
           intitule,
           organisme,
-          ville: item?.place?.city || item?.ville || "",
+          ville: String(item?.place?.city || item?.ville || ville),
           lat: itemLat,
           lon: itemLon,
-          distance_km: Math.round(distance * 10) / 10,
+          distance_km: round1(distance),
           rncp: item?.rncp_code || item?.rncp || "Non renseigné",
-          modalite: item?.onisep_url ? "Présentiel" : "Non renseigné",
-          alternance: item?.diploma?.level ? "Oui" : "Non renseigné",
+          modalite: "Non renseigné",
+          alternance: "Non renseigné",
           categorie: "Diplôme / Titre",
           site_web: item?.company?.website || item?.site_web || null,
           url: item?.url || null,
           niveau: niv,
           match: {
             score: finalScore,
-            reasons: reasons.length > 0 ? reasons : ["Formation pertinente"],
+            reasons: reasons.length ? reasons : ["Formation pertinente"],
           },
           _source: "lba",
         });
       }
 
-      if (allFormations.length >= config.target_min_results) break;
+      // Tri + cap local LBA
+      lbaFormations.sort((a, b) => {
+        const sa = a?.match?.score ?? 0;
+        const sb = b?.match?.score ?? 0;
+        if (sb !== sa) return sb - sa;
+        return (a?.distance_km ?? 9999) - (b?.distance_km ?? 9999);
+      });
+      if (lbaFormations.length > LBA_MAX) lbaFormations = lbaFormations.slice(0, LBA_MAX);
+
+      // ✅ STOP si on a assez
+      if (lbaFormations.length >= config.target_min_results) break;
     }
 
-    // Sort LBA by score desc, then distance asc
-    allFormations.sort((a, b) => {
-      if (b.match.score !== a.match.score) return b.match.score - a.match.score;
-      return (a.distance_km ?? 999) - (b.distance_km ?? 999);
-    });
+    // ✅ Whitelist catalogue Excel (LBA)
+    const lbaWhitelisted = filterByTrainingWhitelist(
+      config.key,
+      lbaFormations,
+      (f: any) => String(f?.intitule ?? ""),
+    );
 
-    allFormations = allFormations.slice(0, LBA_MAX);
-    debug.sources.lba = allFormations.length;
+    // ==================================================================================
+    // 3) MERGE RefEA + LBA (dedup) — avec whitelist sur les deux
+    // ==================================================================================
+    let allFormations = mergeFormationsWithoutDuplicates(refeaWhitelisted, lbaWhitelisted);
 
-    // ===== PHASE 3: Perplexity (enrichissement si nécessaire) =====
+    // ==================================================================================
+    // 4) PERPLEXITY (complément) + WHITELIST EXCEL
+    // ==================================================================================
     let perplexityResults: any[] = [];
     const shouldEnrich = shouldEnrichWithPerplexity(allFormations, {
       min_results: MIN_RESULTS_BEFORE_ENRICH,
@@ -705,82 +838,131 @@ Deno.serve(async (req: Request) => {
         const pplxInput: PerplexityFormationInput = {
           metierLabel: config.label,
           villeRef: ville,
-          lat,
-          lon,
-          limit: PPLX_MAX,
+          lat: userLat!,
+          lon: userLon!,
+          limit: Math.min(PPLX_MAX, Math.max(3, MIN_RESULTS_BEFORE_ENRICH - allFormations.length)),
           job_keywords: [...config.strong_keywords, ...config.synonyms].slice(0, 30),
           banned_keywords: [...config.banned_keywords, ...config.banned_phrases].slice(0, 40),
           hard_cap_km: getPerplexityHardCap(config),
           output_score: PERPLEXITY_SCORE,
         };
 
-        perplexityResults = await fetchPerplexityFormations(pplxInput);
-        debug.sources.perplexity = perplexityResults.length;
+        const raw = await fetchPerplexityFormations(pplxInput);
+
+        // Nettoyage minimal + hard cap distance
+        const hardCap = getPerplexityHardCap(config);
+        perplexityResults = (Array.isArray(raw) ? raw : [])
+          .filter((f: any) => f && typeof f?.distance_km === "number")
+          .filter((f: any) => f.distance_km >= 0 && f.distance_km <= hardCap)
+          .map((f: any) => ({
+            ...f,
+            rncp: f?.rncp ?? "Non renseigné",
+            alternance: f?.alternance ?? "Non renseigné",
+            modalite: f?.modalite ?? "Non renseigné",
+            match: {
+              score: PERPLEXITY_SCORE,
+              reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length
+                ? f.match.reasons.slice(0, MAX_WHY_REASONS)
+                : ["Formation complémentaire vérifiée"].slice(0, MAX_WHY_REASONS),
+            },
+            _source: "perplexity",
+          }))
+          .slice(0, PPLX_MAX);
+
+        // ✅ Whitelist catalogue Excel (Perplexity)
+        const pplxWhitelisted = filterByTrainingWhitelist(
+          config.key,
+          perplexityResults,
+          (f: any) => String(f?.intitule ?? ""),
+        );
+
+        if (pplxWhitelisted.length > 0) {
+          allFormations = mergeFormationsWithoutDuplicates(allFormations, pplxWhitelisted);
+        }
       } catch (e) {
         console.error("[Perplexity] Error:", e);
       }
     }
 
-    // ===== MERGE & DEDUP =====
-    let finalResults = mergeFormationsWithoutDuplicates(refeaResults, allFormations);
-    finalResults = mergeFormationsWithoutDuplicates(finalResults, perplexityResults);
+    // ==================================================================================
+    // 5) FILTRE NIVEAU GLOBAL (au cas où RefEA/Perplexity ont N/A)
+    // ==================================================================================
+    const count_total_avant_filtre = allFormations.length;
 
-    // Final sort by score desc, then distance asc
-    finalResults.sort((a, b) => {
-      const scoreA = a?.match?.score ?? 0;
-      const scoreB = b?.match?.score ?? 0;
-      if (scoreB !== scoreA) return scoreB - scoreA;
-      return (a?.distance_km ?? 999) - (b?.distance_km ?? 999);
-    });
-
-    // Apply global max results cap
-    finalResults = finalResults.slice(0, globalMaxResults);
-
-    // Warning si très peu / ou résultats éloignés
-    if (finalResults.length > 0) {
-      const avgDist =
-        finalResults.reduce((sum, x) => sum + (typeof x.distance_km === "number" ? x.distance_km : 0), 0) /
-        finalResults.length;
-      if (avgDist > (config.soft_distance_cap_km ?? 200)) warnings.far_results = true;
+    let results = allFormations;
+    if (niveauFiltre !== "all") {
+      results = results.filter((r: any) => r?.niveau === niveauFiltre);
     }
 
-    // ✅ RÉPONSE AU FORMAT ATTENDU PAR TON FRONT
+    // ==================================================================================
+    // 6) TRI FINAL + CAP GLOBAL
+    // ==================================================================================
+    results.sort((a: any, b: any) => {
+      const sa = a?.match?.score ?? 0;
+      const sb = b?.match?.score ?? 0;
+      if (sb !== sa) return sb - sa;
+
+      const da = typeof a?.distance_km === "number" ? a.distance_km : 9999;
+      const db = typeof b?.distance_km === "number" ? b.distance_km : 9999;
+      return da - db;
+    });
+
+    if (results.length > globalMaxResults) results = results.slice(0, globalMaxResults);
+
+    // ==================================================================================
+    // 7) WARNINGS (far results)
+    // ==================================================================================
+    const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
+    const maxDist = results.reduce((m: number, r: any) => {
+      const d = typeof r?.distance_km === "number" ? r.distance_km : 9999;
+      return Math.max(m, d);
+    }, 0);
+
+    warnings.far_results = results.length > 0 && maxDist > soft;
+    warnings.no_relevant_results = results.length === 0;
+
+    // ==================================================================================
+    // 8) DEBUG sources count
+    // ==================================================================================
+    if (DEBUG && debug) {
+      debug.sources.refea = refeaWhitelisted.length;
+      debug.sources.lba = lbaWhitelisted.length;
+      debug.sources.perplexity = perplexityResults.length;
+    }
+
+    // ==================================================================================
+    // RESPONSE (format attendu par ton front)
+    // ==================================================================================
     return new Response(
       JSON.stringify({
-        // champs attendus par SearchFormationsResponse
         metier_detecte: config.label,
         ville_reference: ville,
         rayon_applique: `${appliedRadiusKm} km`,
         mode: searchMode,
-        count: finalResults.length,
-        count_total: finalResults.length,
 
-        formations: finalResults,
+        count_total: count_total_avant_filtre,
+        count: results.length,
 
-        warnings,
-        debug,
+        formations: results,
 
-        // meta (bonus, pas obligatoire)
-        meta: {
-          total: finalResults.length,
-          sources: {
-            refea: refeaResults.length,
-            lba: allFormations.length,
-            perplexity: perplexityResults.length,
-          },
-          config: {
-            metier: config.label,
-            ville,
-            niveau: niveauFiltre,
-            mode: searchMode,
-          },
+        warnings: {
+          ...warnings,
+          absolute_min_score: ABSOLUTE_MIN_SCORE,
         },
+
+        debug: DEBUG
+          ? {
+              ...debug,
+              caps: { globalMaxResults, REFEA_MAX, LBA_MAX, PPLX_MAX },
+              whitelist_enabled: true,
+            }
+          : undefined,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (error: any) {
     console.error("[ERROR]", error);
-    return new Response(JSON.stringify({ error: "Erreur serveur", details: error.message }), {
+    return new Response(JSON.stringify({ error: "Erreur serveur", details: error?.message ?? String(error) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
