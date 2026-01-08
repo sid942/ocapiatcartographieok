@@ -70,7 +70,10 @@ export const REFEA_RULES: Record<string, Rules> = {
   },
 
   "technicien_culture": {
-    mustAny: ["culture", "agronomie", "maraichage", "grandes cultures", "irrigation", "sol", "fertilisation", "vegetale", "conseil", "production vegetale"],
-    forbidAny: ["equitation", "cheval", "paysagiste", "creation", "foret", "bucheronnage", "aquaculture", "pisciculture", "elevage", "animal", "bovin", "porcin", "ovin", "seconde pro", "4eme", "3eme"],
+    mustAny: ["culture", "agronomie", "maraichage", "grandes cultures", "irrigation", "sol", "fertilisation", "vegetale", "conseil", "production vegetale", "agroecologie"],
+    // AJOUTE "vigne", "viticulture", "oenologie" si tu veux exclure le vin
+    // AJOUTE "sylviculture", "foret", "bucheronnage" pour virer le bois
+    // AJOUTE "bac techno", "stav" pour virer le lycée pur
+    forbidAny: ["equitation", "cheval", "paysagiste", "creation", "foret", "bucheronnage", "sylviculture", "aquaculture", "pisciculture", "elevage", "animal", "bovin", "porcin", "ovin", "seconde pro", "4eme", "3eme", "bac techno", "stav", "viticulture", "vigne", "oenologie"],
   },
 };
