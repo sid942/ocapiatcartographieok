@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { AlertCircle, Loader2, MapPin } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -8,7 +8,6 @@ import { FormationMap, FormationMapRef } from "./components/FormationMap";
 
 import { geocodeCityToLatLon } from "./services/nominatim";
 
-import { METIERS } from "./types";
 import type {
   Formation,
   MetierKey,
@@ -23,7 +22,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undef
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
-    "Variables d'environnement Supabase manquantes (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).",
+    "Variables d'environnement Supabase manquantes (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
   );
 }
 
@@ -41,54 +40,53 @@ function humanizeMode(mode?: SearchMode) {
   switch (mode) {
     case "strict":
       return { label: "Strict", hint: "Résultats très pertinents uniquement." };
+
     case "relaxed":
       return {
         label: "Élargi",
-        hint: "Pertinence assouplie pour éviter un résultat vide, en gardant les plus proches en tête.",
+        hint: "On assouplit la pertinence pour éviter un résultat vide, en gardant les plus proches en tête.",
       };
+
     case "fallback_rome":
       return {
         label: "Secours ROME",
         hint: "ROME élargi pour éviter un résultat vide (le scoring garde la cohérence).",
       };
+
     case "strict+relaxed":
-      return { label: "Strict + Élargi", hint: "Strict d’abord, puis élargi pour compléter." };
+      return {
+        label: "Strict + Élargi",
+        hint: "Strict d’abord, puis élargi pour compléter.",
+      };
+
     case "strict+relaxed+fallback_rome":
-      return { label: "Strict + Élargi + Secours ROME", hint: "Tous les filets de sécurité activés." };
+      return {
+        label: "Strict + Élargi + Secours ROME",
+        hint: "Tous les filets de sécurité activés.",
+      };
+
     default:
       return null;
   }
 }
 
 function shouldShowFallbackBanner(mode?: SearchMode) {
-  return !!mode && mode !== "strict";
-}
-
-function getMetierLabelFromKey(key: MetierKey) {
-  return METIERS.find((m) => m.key === key)?.label ?? key;
+  if (!mode) return false;
+  return mode !== "strict";
 }
 
 function App() {
   const mapRef = useRef<FormationMapRef>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   const [formations, setFormations] = useState<Formation[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // ✅ On garde aussi ce que l’utilisateur a demandé (source-of-truth UX)
-  const [requested, setRequested] = useState<{
-    metierKey: MetierKey;
-    metierLabel: string;
-    ville: string;
-    niveau: NiveauFiltre;
-  } | null>(null);
-
   const [searchMeta, setSearchMeta] = useState<{
-    metier_detecte: string;
-    ville_reference: string;
-    rayon_applique: string;
+    metier: string;
+    ville: string;
+    rayon: string;
     count: number;
     countTotal?: number;
     mode?: SearchMode;
@@ -97,88 +95,51 @@ function App() {
   } | null>(null);
 
   const handleSearch = async (metierKey: MetierKey, ville: string, niveau: NiveauFiltre) => {
-    // ✅ cancel requête précédente
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
     setIsLoading(true);
     setError(null);
     setFormations([]);
     setHasSearched(true);
     setSearchMeta(null);
 
-    const metierLabel = getMetierLabelFromKey(metierKey);
-    const villeClean = ville.trim();
-
-    setRequested({ metierKey, metierLabel, ville: villeClean, niveau });
-
     try {
-      // 1) Géocodage ville -> lat/lon (obligatoire pour ta Edge Function)
-      const coords = await geocodeCityToLatLon(villeClean);
+      const villeClean = ville.trim();
+      if (!villeClean) throw new Error("Ville vide");
 
-      if (controller.signal.aborted) return;
-
-      if (!coords) {
-        throw new Error(
-          `Ville introuvable : "${villeClean}". Essaie par ex. "Paris, France" ou "Lyon".`,
-        );
+      // ✅ 1) Géocoder (obligatoire car l’Edge Function attend lat/lon)
+      const geo = await geocodeCityToLatLon(villeClean);
+      if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) {
+        throw new Error("Impossible de géocoder la ville. Choisis une suggestion de ville valide.");
       }
 
-      // 2) Payload COMPLET attendu par le backend
+      // ✅ 2) Appeler l’Edge Function avec lat/lon
       const payload = {
-        metier: metierKey,     // clé (ex: "silo")
-        ville: villeClean,     // texte ville
-        lat: coords.lat,       // ✅ obligatoire
-        lon: coords.lon,       // ✅ obligatoire
-        niveau,                // filtre
+        metier: metierKey,
+        ville: villeClean,
+        lat: geo.lat,
+        lon: geo.lon,
+        niveau,
       };
 
-      // Debug lisible
-      console.groupCollapsed(
-        `%c[SEARCH] ${metierKey} / ${villeClean} / niveau=${niveau}`,
-        "color:#74114D;font-weight:bold;",
-      );
-      console.log("coords:", coords);
-      console.log("payload:", payload);
-      console.groupEnd();
-
-      // 3) Appel Edge Function
       const { data, error: functionError } = await supabase.functions.invoke("search-formations", {
         body: payload,
-        signal: controller.signal,
       });
 
-      if (controller.signal.aborted) return;
-
       if (functionError) {
-        console.error("Function error:", functionError);
-        throw new Error(functionError.message || "Erreur serveur (Edge Function)");
+        // Supabase renvoie souvent un message générique, donc on affiche le + utile
+        throw new Error(functionError.message || "Erreur de connexion au serveur");
       }
+
       if (!data) throw new Error("Réponse serveur vide");
-      if (data.error) throw new Error(data.error);
+      if ((data as any).error) throw new Error((data as any).error);
 
       const api = data as SearchFormationsResponse;
       const results = Array.isArray(api.formations) ? api.formations : [];
 
-      console.groupCollapsed(
-        `%c[SEARCH:RESPONSE] count=${api.count} total=${api.count_total ?? "?"} mode=${api.mode ?? "?"}`,
-        "color:#47A152;font-weight:bold;",
-      );
-      console.log("metier_detecte:", api.metier_detecte);
-      console.log("ville_reference:", api.ville_reference);
-      console.log("rayon_applique:", api.rayon_applique);
-      console.log("warnings:", api.warnings);
-      console.log("debug:", api.debug);
-      console.log("first results:", results.slice(0, 3));
-      console.groupEnd();
-
       setFormations(results);
-
       setSearchMeta({
-        metier_detecte: api.metier_detecte,
-        ville_reference: api.ville_reference,
-        rayon_applique: api.rayon_applique,
+        metier: api.metier_detecte,
+        ville: api.ville_reference,
+        rayon: api.rayon_applique,
         count: typeof api.count === "number" ? api.count : results.length,
         countTotal: typeof api.count_total === "number" ? api.count_total : undefined,
         mode: api.mode,
@@ -186,20 +147,18 @@ function App() {
         debug: api.debug,
       });
 
-      // Zoom auto sur la première formation géolocalisée
       if (mapRef.current && results.length > 0) {
         const firstGeo = results.find((f) => typeof f.lat === "number" && typeof f.lon === "number");
         if (firstGeo) {
-          setTimeout(() => mapRef.current?.flyToFormation(firstGeo), 250);
+          setTimeout(() => mapRef.current?.flyToFormation(firstGeo), 300);
         }
       }
     } catch (err) {
-      if (controller.signal.aborted) return;
       console.error("Search error:", err);
       const msg = err instanceof Error ? err.message : "Erreur inconnue";
       setError(`Erreur système : ${msg}`);
     } finally {
-      if (!controller.signal.aborted) setIsLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -211,42 +170,33 @@ function App() {
 
   const showEmptyState = !isLoading && formations.length === 0 && !error && hasSearched;
 
-  const rayonNormalized = normalizeForSearch(searchMeta?.rayon_applique ?? "");
+  const rayonNormalized = normalizeForSearch(searchMeta?.rayon ?? "");
   const isExpandedRadius = rayonNormalized.includes("elargi") || rayonNormalized.includes("élargi");
 
   const modeInfo = humanizeMode(searchMeta?.mode);
   const showFallbackBanner = shouldShowFallbackBanner(searchMeta?.mode);
 
   const farResults = !!searchMeta?.warnings?.far_results;
-  const geoScore =
-    typeof searchMeta?.warnings?.geocode_score === "number" ? searchMeta.warnings.geocode_score : null;
+  const geoScore = typeof searchMeta?.warnings?.geocode_score === "number" ? searchMeta.warnings.geocode_score : null;
 
   const showGeoApprox =
-    geoScore !== null &&
-    geoScore > 0 &&
-    geoScore < 0.55 &&
-    normalizeForSearch(searchMeta?.ville_reference ?? "").length <= 10;
+    geoScore !== null && geoScore > 0 && geoScore < 0.55 && normalizeForSearch(searchMeta?.ville ?? "").length <= 10;
 
-  // ✅ ALERTE CRITIQUE : backend dit "Recherche Générale" alors que l’utilisateur a choisi un vrai métier
-  const backendSaysGeneral =
-    normalizeForSearch(searchMeta?.metier_detecte ?? "") === "recherche generale" ||
-    normalizeForSearch(searchMeta?.metier_detecte ?? "") === "recherche générale";
-
-  const mismatchMetier = !!requested && !!searchMeta && backendSaysGeneral;
-
-  const emptyStateMessage = useMemo(() => {
-    const dbg = searchMeta?.debug;
-    const raw = dbg?.raw_count_last;
-    const keptStrict = dbg?.kept_count_strict_last;
+  const emptyStateMessage = (() => {
+    const dbg = searchMeta?.debug as any;
+    const raw = dbg?.raw_count_last ?? undefined;
+    const keptStrict = dbg?.kept_count_strict_last ?? undefined;
 
     if (typeof raw === "number" && raw === 0) {
       return "Aucune formation trouvée dans la base pour cette zone. Essayez une ville plus grande ou un métier voisin.";
     }
+
     if (typeof raw === "number" && raw > 0 && typeof keptStrict === "number" && keptStrict === 0) {
       return "Des formations existent, mais aucune n’a passé le filtre de pertinence. Essayez une autre ville proche ou un métier voisin.";
     }
+
     return "Essayez une autre zone. Le moteur privilégie toujours les formations les plus pertinentes.";
-  }, [searchMeta]);
+  })();
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
@@ -275,25 +225,9 @@ function App() {
         </div>
 
         {error && (
-          <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+          <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 animate-in slide-in-from-top-2">
             <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-red-800 leading-snug">{error}</p>
-          </div>
-        )}
-
-        {/* ✅ ALERTE MISMATCH METIER */}
-        {mismatchMetier && (
-          <div className="mx-4 mb-4 bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-xs text-yellow-900">
-            <div className="font-bold mb-1">⚠️ Incohérence détectée</div>
-            <div>
-              Tu as demandé : <b>{requested?.metierLabel}</b> ({requested?.metierKey})
-            </div>
-            <div>
-              Le backend répond : <b>{searchMeta?.metier_detecte}</b>
-            </div>
-            <div className="mt-2 text-[11px] text-yellow-800">
-              Si ça persiste, c’est côté backend (détection métier / function pas redéployée).
-            </div>
           </div>
         )}
 
@@ -301,29 +235,22 @@ function App() {
         {searchMeta && !isLoading && !error && (
           <div className="mx-4 mb-4 bg-[#47A152]/10 border border-[#47A152]/30 rounded-lg p-3 shadow-sm">
             <div className="space-y-2 text-xs">
-              {requested && (
-                <div className="flex justify-between items-center border-b border-[#47A152]/20 pb-1">
-                  <span className="text-gray-600">Métier demandé :</span>
-                  <span className="font-bold text-gray-900 text-right">{requested.metierLabel}</span>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center border-b border-[#47A152]/20 pb-1">
                 <span className="text-gray-600">Métier identifié :</span>
-                <span className="font-bold text-[#74114D] text-right">{searchMeta.metier_detecte}</span>
+                <span className="font-bold text-[#74114D] text-right">{searchMeta.metier}</span>
               </div>
 
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Zone de recherche :</span>
                 <span className="font-semibold text-gray-800 text-right flex items-center gap-1 justify-end">
                   <MapPin className="h-3 w-3 text-[#47A152]" />
-                  {searchMeta.ville_reference}
+                  {searchMeta.ville}
                 </span>
               </div>
 
               <div className="flex justify-between items-center text-[10px] text-gray-500 italic">
                 <span>Rayon appliqué :</span>
-                <span>{searchMeta.rayon_applique}</span>
+                <span>{searchMeta.rayon}</span>
               </div>
 
               {!rayonNormalized.includes("elargi automatiquement") && isExpandedRadius && (
@@ -367,11 +294,13 @@ function App() {
         )}
 
         {!isLoading && formations.length > 0 && (
-          <div className="px-4 pb-4">
+          <div className="px-4 pb-4 animate-in fade-in duration-500">
             <div className="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               {formations.length} formation(s) affichée(s)
               {typeof searchMeta?.countTotal === "number" && searchMeta.countTotal !== formations.length ? (
-                <span className="normal-case font-normal ml-1 text-gray-400">(sur {searchMeta.countTotal})</span>
+                <span className="normal-case font-normal ml-1 text-gray-400">
+                  (sur {searchMeta.countTotal})
+                </span>
               ) : null}
             </div>
 
