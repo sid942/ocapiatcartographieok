@@ -14,7 +14,7 @@ export const REFEA_RULES: Record<string, Rules> = {
   
   "technico": { 
     mustAny: ["commerce", "commercial", "vente", "negociation", "technico", "distribution", "agrofourniture", "conseil vente", "business"],
-    forbidAny: ["paysagiste", "amenagements paysagers", "creation", "equitation", "hippique", "cheval", "aquaculture", "poisson", "foret", "bucheronnage", "animalerie", "canin", "felin", "fleuriste", "service a la personne", "seconde pro", "4eme", "3eme"],
+    forbidAny: ["paysagiste", "amenagements paysagers", "creation", "equitation", "hippique", "cheval", "aquaculture", "poisson", "foret", "bucheronnage", "animalerie", "animaux de compagnie", "jardin", "animal", "canin", "felin", "fleuriste", "service a la personne", "seconde pro", "4eme", "3eme"],
   },
 
   "commercial_export": {
