@@ -1135,6 +1135,5 @@ return new Response(
   }),
   { headers: { ...corsHeaders, "Content-Type": "application/json" } },
 );
-
   }
 });
