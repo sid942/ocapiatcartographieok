@@ -209,10 +209,10 @@ function App() {
     normalizeForSearch(searchMeta?.metier_detecte ?? "") === "recherche générale";
 
   const mismatchMetier =
-    !!requested &&
-    !!searchMeta &&
-    backendSaysGeneral &&
-    requested.metierKey !== "default"; // (même si tu n’as pas "default" dans ton UI)
+  !!requested &&
+  !!searchMeta &&
+  backendSaysGeneral;
+
 
   const emptyStateMessage = useMemo(() => {
     const dbg = searchMeta?.debug;
