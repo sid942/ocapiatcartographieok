@@ -167,7 +167,6 @@ const JOB_PROFILES: Record<string, JobProfile> = {
       "negoce agricole",
       "négoce agricole",
       "biens services pour l agriculture",
-      // IMPORTANT: on garde mais ça ne doit PAS suffire sans whitelist
       "alimentation et boissons",
       "distribution agricole",
     ],
@@ -291,7 +290,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
       "pulvérisateur",
     ],
     synonyms: ["recolte", "récolte", "benne", "remorque"],
-    weak_keywords: ["conduite"], // faible
+    weak_keywords: ["conduite"],
     context_keywords: ["cgea", "grandes cultures"],
     banned_keywords: ["taxi", "vtc", "bus", "autocar", "voyageurs", "btp", "travaux publics", "routier", "poids lourd"],
     banned_phrases: ["transport de personnes", "transport routier"],
@@ -631,12 +630,11 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json().catch(() => ({} as any));
-    const metier = String(body?.metier ?? "").trim(); // key du métier (ex: technico, silo...)
+    const metier = String(body?.metier ?? "").trim();
     const ville = String(body?.ville ?? "").trim();
     const niveauFiltre: NiveauFiltre = (body?.niveau ?? "all") as NiveauFiltre;
     const searchMode: Mode = (body?.mode ?? "strict+relaxed+fallback_rome") as Mode;
 
-    // lat/lon facultatifs (si ton front les envoie un jour, on les utilise)
     const latFromReq = toFiniteNumber(body?.lat);
     const lonFromReq = toFiniteNumber(body?.lon);
 
@@ -655,7 +653,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // --- GEO ---
     let userLat = latFromReq;
     let userLon = lonFromReq;
 
@@ -688,7 +685,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Pour affichage UI
     let appliedRadiusKm = config.radius_km;
 
     const globalMaxResults = config.max_results ?? GLOBAL_MAX_RESULTS_DEFAULT;
@@ -696,10 +692,8 @@ Deno.serve(async (req: Request) => {
     // ==================================================================================
     // 1) RefEA (source officielle) + WHITELIST EXCEL
     // ==================================================================================
-    // ✅ TEMPORAIRE : RefEA OFF (évite timeout / bundle trop lourd)
     let refeaResults: any[] = [];
 
-    // ✅ Whitelist catalogue Excel (RefEA)
     const refeaWhitelisted = filterByTrainingWhitelist(
       config.key,
       refeaResults,
@@ -753,13 +747,11 @@ Deno.serve(async (req: Request) => {
         const finalScore = applyDistanceBonus(baseScore, distance, config);
         if (finalScore < ABSOLUTE_MIN_SCORE) continue;
 
-        // Niveau
         const niv =
           String(item?.diploma?.level ?? "").trim() ||
           inferNiveauFromText(intitule) ||
           "N/A";
 
-        // Filtre niveau (après scoring)
         if (niveauFiltre !== "all") {
           if (niv === "N/A") continue;
           if (niv !== niveauFiltre) continue;
@@ -788,7 +780,6 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      // Tri + cap local LBA
       lbaFormations.sort((a, b) => {
         const sa = a?.match?.score ?? 0;
         const sb = b?.match?.score ?? 0;
@@ -797,11 +788,9 @@ Deno.serve(async (req: Request) => {
       });
       if (lbaFormations.length > LBA_MAX) lbaFormations = lbaFormations.slice(0, LBA_MAX);
 
-      // ✅ STOP si on a assez
       if (lbaFormations.length >= config.target_min_results) break;
     }
 
-    // ✅ Whitelist catalogue Excel (LBA)
     const lbaWhitelisted = filterByTrainingWhitelist(
       config.key,
       lbaFormations,
@@ -809,7 +798,7 @@ Deno.serve(async (req: Request) => {
     );
 
     // ==================================================================================
-    // 3) MERGE RefEA + LBA (dedup) — avec whitelist sur les deux
+    // 3) MERGE RefEA + LBA (dedup)
     // ==================================================================================
     let allFormations = mergeFormationsWithoutDuplicates(refeaWhitelisted, lbaWhitelisted);
 
@@ -838,7 +827,6 @@ Deno.serve(async (req: Request) => {
 
         const raw = await fetchPerplexityFormations(pplxInput);
 
-        // Nettoyage minimal + hard cap distance + whitelist
         const hardCap = getPerplexityHardCap(config);
         perplexityResults = (Array.isArray(raw) ? raw : [])
           .filter((f: any) => f && typeof f?.distance_km === "number")
@@ -868,7 +856,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ==================================================================================
-    // 5) FILTRE NIVEAU GLOBAL (au cas où RefEA/Perplexity ont N/A)
+    // 5) FILTRE NIVEAU GLOBAL
     // ==================================================================================
     const count_total_avant_filtre = allFormations.length;
 
@@ -893,7 +881,7 @@ Deno.serve(async (req: Request) => {
     if (results.length > globalMaxResults) results = results.slice(0, globalMaxResults);
 
     // ==================================================================================
-    // 7) WARNINGS (far results)
+    // 7) WARNINGS
     // ==================================================================================
     const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
     const maxDist = results.reduce((m: number, r: any) => {
@@ -914,7 +902,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ==================================================================================
-    // RESPONSE (format attendu par ton front)
+    // RESPONSE
     // ==================================================================================
     return new Response(
       JSON.stringify({
