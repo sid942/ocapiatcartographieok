@@ -6,6 +6,7 @@ import { SearchForm } from "./components/SearchForm";
 import { FormationList } from "./components/FormationList";
 import { FormationMap, FormationMapRef } from "./components/FormationMap";
 
+import { METIERS } from "./types";
 import type {
   Formation,
   MetierKey,
@@ -27,8 +28,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // ----------------------------
 
-const DEBUG_CLIENT = false; // mets à true si tu veux voir les payloads
-
 function normalizeForSearch(s: string) {
   return (s ?? "")
     .toLowerCase()
@@ -40,32 +39,20 @@ function humanizeMode(mode?: SearchMode) {
   switch (mode) {
     case "strict":
       return { label: "Strict", hint: "Résultats très pertinents uniquement." };
-
     case "relaxed":
       return {
         label: "Élargi",
-        hint:
-          "On assouplit la pertinence pour éviter un résultat vide, en gardant les plus proches en tête.",
+        hint: "Pertinence assouplie pour éviter un résultat vide, en gardant les plus proches en tête.",
       };
-
     case "fallback_rome":
       return {
         label: "Secours ROME",
         hint: "ROME élargi pour éviter un résultat vide (le scoring garde la cohérence).",
       };
-
     case "strict+relaxed":
-      return {
-        label: "Strict + Élargi",
-        hint: "Strict d’abord, puis élargi pour compléter.",
-      };
-
+      return { label: "Strict + Élargi", hint: "Strict d’abord, puis élargi pour compléter." };
     case "strict+relaxed+fallback_rome":
-      return {
-        label: "Strict + Élargi + Secours ROME",
-        hint: "Tous les filets de sécurité activés.",
-      };
-
+      return { label: "Strict + Élargi + Secours ROME", hint: "Tous les filets de sécurité activés." };
     default:
       return null;
   }
@@ -75,51 +62,43 @@ function shouldShowFallbackBanner(mode?: SearchMode) {
   return !!mode && mode !== "strict";
 }
 
-function safeString(x: any): string {
-  return typeof x === "string" ? x : "";
+function getMetierLabelFromKey(key: MetierKey) {
+  return METIERS.find((m) => m.key === key)?.label ?? key;
 }
 
 function App() {
   const mapRef = useRef<FormationMapRef>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [formations, setFormations] = useState<Formation[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
-  const [searchMeta, setSearchMeta] = useState<{
-    metier: string;
+  // ✅ On garde aussi ce que l’utilisateur a demandé (source-of-truth UX)
+  const [requested, setRequested] = useState<{
+    metierKey: MetierKey;
+    metierLabel: string;
     ville: string;
-    rayon: string;
+    niveau: NiveauFiltre;
+  } | null>(null);
 
-    // count affiché (après filtre niveau)
+  const [searchMeta, setSearchMeta] = useState<{
+    metier_detecte: string;
+    ville_reference: string;
+    rayon_applique: string;
     count: number;
-
-    // total trouvé avant filtre niveau
     countTotal?: number;
-
     mode?: SearchMode;
     warnings?: SearchFormationsResponse["warnings"];
     debug?: SearchFormationsResponse["debug"];
   } | null>(null);
 
-  const handleSearch = async (
-    metierKey: MetierKey,
-    ville: string,
-    niveau: NiveauFiltre,
-  ) => {
-    // Guard front : si metierKey vide => on refuse (évite "Recherche Générale" côté backend)
-    const mk = safeString(metierKey).trim() as MetierKey;
-    const v = safeString(ville).trim();
-
-    if (!mk) {
-      setError("Métier manquant. Recharge la page et réessaie.");
-      return;
-    }
-    if (!v) {
-      setError("Ville manquante. Merci d’indiquer une ville.");
-      return;
-    }
+  const handleSearch = async (metierKey: MetierKey, ville: string, niveau: NiveauFiltre) => {
+    // ✅ cancel requête précédente
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setIsLoading(true);
     setError(null);
@@ -127,49 +106,57 @@ function App() {
     setHasSearched(true);
     setSearchMeta(null);
 
-    // ✅ PAYLOAD UNIQUE ET CORRECT : le backend lit body.metier / body.ville / body.niveau
-    const payload = {
-      metier: mk, // ⚠️ IMPORTANT : "metier" (pas metierKey)
-      ville: v,
-      niveau,
-    };
+    const metierLabel = getMetierLabelFromKey(metierKey);
+    const villeClean = ville.trim();
 
-    if (DEBUG_CLIENT) {
-      // Ce log te permet de vérifier en 1 sec si tu envoies bien "metier"
-      console.log("🔎 search-formations payload =>", payload);
-    }
+    setRequested({ metierKey, metierLabel, ville: villeClean, niveau });
+
+    const payload = { metier: metierKey, ville: villeClean, niveau };
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke(
-        "search-formations",
-        { body: payload },
+      // Debug lisible : tu sauras TOUT DE SUITE si tu appelles le bon backend
+      console.groupCollapsed(
+        `%c[SEARCH] ${metierKey} / ${villeClean} / niveau=${niveau}`,
+        "color:#74114D;font-weight:bold;",
       );
+      console.log("payload:", payload);
+      console.groupEnd();
 
-      if (functionError) {
-        throw new Error(
-          functionError.message || "Erreur de connexion au serveur (Supabase Functions).",
-        );
-      }
-      if (!data) throw new Error("Réponse serveur vide.");
+      const { data, error: functionError } = await supabase.functions.invoke("search-formations", {
+        body: payload,
+        // @ts-expect-error supabase-js ne typpe pas signal ici mais ça passe en runtime fetch
+        signal: controller.signal,
+      });
 
-      // Certaines implémentations renvoient { error: ... }
-      if (typeof (data as any)?.error === "string" && (data as any).error) {
-        throw new Error((data as any).error);
-      }
+      if (controller.signal.aborted) return;
+
+      if (functionError) throw new Error(functionError.message || "Erreur de connexion au serveur");
+      if (!data) throw new Error("Réponse serveur vide");
+      if (data.error) throw new Error(data.error);
 
       const api = data as SearchFormationsResponse;
+      const results = Array.isArray(api.formations) ? api.formations : [];
 
-      const results = Array.isArray(api.formations) ? (api.formations as Formation[]) : [];
+      console.groupCollapsed(
+        `%c[SEARCH:RESPONSE] count=${api.count} total=${api.count_total ?? "?"} mode=${api.mode ?? "?"}`,
+        "color:#47A152;font-weight:bold;",
+      );
+      console.log("metier_detecte:", api.metier_detecte);
+      console.log("ville_reference:", api.ville_reference);
+      console.log("rayon_applique:", api.rayon_applique);
+      console.log("warnings:", api.warnings);
+      console.log("debug:", api.debug);
+      console.log("first results:", results.slice(0, 3));
+      console.groupEnd();
+
       setFormations(results);
 
       setSearchMeta({
-        metier: safeString(api.metier_detecte) || "—",
-        ville: safeString(api.ville_reference) || v,
-        rayon: safeString(api.rayon_applique) || "—",
-
+        metier_detecte: api.metier_detecte,
+        ville_reference: api.ville_reference,
+        rayon_applique: api.rayon_applique,
         count: typeof api.count === "number" ? api.count : results.length,
         countTotal: typeof api.count_total === "number" ? api.count_total : undefined,
-
         mode: api.mode,
         warnings: api.warnings,
         debug: api.debug,
@@ -177,19 +164,18 @@ function App() {
 
       // Zoom auto sur la première formation géolocalisée
       if (mapRef.current && results.length > 0) {
-        const firstGeo = results.find(
-          (f) => typeof f.lat === "number" && typeof f.lon === "number",
-        );
+        const firstGeo = results.find((f) => typeof f.lat === "number" && typeof f.lon === "number");
         if (firstGeo) {
           setTimeout(() => mapRef.current?.flyToFormation(firstGeo), 250);
         }
       }
     } catch (err) {
+      if (controller.signal.aborted) return;
       console.error("Search error:", err);
       const msg = err instanceof Error ? err.message : "Erreur inconnue";
       setError(`Erreur système : ${msg}`);
     } finally {
-      setIsLoading(false);
+      if (!controller.signal.aborted) setIsLoading(false);
     }
   };
 
@@ -201,45 +187,46 @@ function App() {
 
   const showEmptyState = !isLoading && formations.length === 0 && !error && hasSearched;
 
-  const rayonNormalized = useMemo(
-    () => normalizeForSearch(searchMeta?.rayon ?? ""),
-    [searchMeta?.rayon],
-  );
+  const rayonNormalized = normalizeForSearch(searchMeta?.rayon_applique ?? "");
   const isExpandedRadius = rayonNormalized.includes("elargi") || rayonNormalized.includes("élargi");
 
-  const modeInfo = useMemo(() => humanizeMode(searchMeta?.mode), [searchMeta?.mode]);
-  const showFallbackBanner = useMemo(
-    () => shouldShowFallbackBanner(searchMeta?.mode),
-    [searchMeta?.mode],
-  );
+  const modeInfo = humanizeMode(searchMeta?.mode);
+  const showFallbackBanner = shouldShowFallbackBanner(searchMeta?.mode);
 
   const farResults = !!searchMeta?.warnings?.far_results;
   const geoScore =
-    typeof searchMeta?.warnings?.geocode_score === "number"
-      ? searchMeta.warnings.geocode_score
-      : null;
+    typeof searchMeta?.warnings?.geocode_score === "number" ? searchMeta.warnings.geocode_score : null;
 
   const showGeoApprox =
     geoScore !== null &&
     geoScore > 0 &&
     geoScore < 0.55 &&
-    normalizeForSearch(searchMeta?.ville ?? "").length <= 10;
+    normalizeForSearch(searchMeta?.ville_reference ?? "").length <= 10;
+
+  // ✅ ALERTE CRITIQUE : backend dit "Recherche Générale" alors que l’utilisateur a choisi un vrai métier
+  const backendSaysGeneral =
+    normalizeForSearch(searchMeta?.metier_detecte ?? "") === "recherche generale" ||
+    normalizeForSearch(searchMeta?.metier_detecte ?? "") === "recherche générale";
+
+  const mismatchMetier =
+    !!requested &&
+    !!searchMeta &&
+    backendSaysGeneral &&
+    requested.metierKey !== "default"; // (même si tu n’as pas "default" dans ton UI)
 
   const emptyStateMessage = useMemo(() => {
-    const dbg = searchMeta?.debug as any;
-    const raw = dbg?.raw_count_last ?? undefined;
-    const keptStrict = dbg?.kept_count_strict_last ?? undefined;
+    const dbg = searchMeta?.debug;
+    const raw = dbg?.raw_count_last;
+    const keptStrict = dbg?.kept_count_strict_last;
 
     if (typeof raw === "number" && raw === 0) {
       return "Aucune formation trouvée dans la base pour cette zone. Essayez une ville plus grande ou un métier voisin.";
     }
-
     if (typeof raw === "number" && raw > 0 && typeof keptStrict === "number" && keptStrict === 0) {
       return "Des formations existent, mais aucune n’a passé le filtre de pertinence. Essayez une autre ville proche ou un métier voisin.";
     }
-
     return "Essayez une autre zone. Le moteur privilégie toujours les formations les plus pertinentes.";
-  }, [searchMeta?.debug]);
+  }, [searchMeta]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
@@ -268,9 +255,26 @@ function App() {
         </div>
 
         {error && (
-          <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 animate-in slide-in-from-top-2">
+          <div className="mx-4 mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
             <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-red-800 leading-snug">{error}</p>
+          </div>
+        )}
+
+        {/* ✅ ALERTE MISMATCH METIER (c’est LE symptôme que tu modifies pas le bon endroit / pas déployé) */}
+        {mismatchMetier && (
+          <div className="mx-4 mb-4 bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-xs text-yellow-900">
+            <div className="font-bold mb-1">⚠️ Incohérence détectée</div>
+            <div>
+              Tu as demandé : <b>{requested?.metierLabel}</b> ({requested?.metierKey})
+            </div>
+            <div>
+              Le backend répond : <b>{searchMeta?.metier_detecte}</b>
+            </div>
+            <div className="mt-2 text-[11px] text-yellow-800">
+              Ça arrive quand la Function Supabase déployée n’est pas celle que tu modifies (doublon de fichiers, ou
+              function non redéployée).
+            </div>
           </div>
         )}
 
@@ -278,24 +282,30 @@ function App() {
         {searchMeta && !isLoading && !error && (
           <div className="mx-4 mb-4 bg-[#47A152]/10 border border-[#47A152]/30 rounded-lg p-3 shadow-sm">
             <div className="space-y-2 text-xs">
-              <div className="flex justify-between items-center border-b border-[#47A152]/20 pb-1">
+              {/* ✅ affiche aussi métier demandé */}
+              {requested && (
+                <div className="flex justify-between items-center border-b border-[#47A152]/20 pb-1">
+                  <span className="text-gray-600">Métier demandé :</span>
+                  <span className="font-bold text-gray-900 text-right">{requested.metierLabel}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center">
                 <span className="text-gray-600">Métier identifié :</span>
-                <span className="font-bold text-[#74114D] text-right">
-                  {searchMeta.metier}
-                </span>
+                <span className="font-bold text-[#74114D] text-right">{searchMeta.metier_detecte}</span>
               </div>
 
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Zone de recherche :</span>
                 <span className="font-semibold text-gray-800 text-right flex items-center gap-1 justify-end">
                   <MapPin className="h-3 w-3 text-[#47A152]" />
-                  {searchMeta.ville}
+                  {searchMeta.ville_reference}
                 </span>
               </div>
 
               <div className="flex justify-between items-center text-[10px] text-gray-500 italic">
                 <span>Rayon appliqué :</span>
-                <span>{searchMeta.rayon}</span>
+                <span>{searchMeta.rayon_applique}</span>
               </div>
 
               {!rayonNormalized.includes("elargi automatiquement") && isExpandedRadius && (
@@ -306,8 +316,7 @@ function App() {
 
               {modeInfo && (
                 <div className="text-[10px] text-gray-500 italic pt-1 border-t border-[#47A152]/20">
-                  Mode pertinence :{" "}
-                  <span className="font-semibold">{modeInfo.label}</span>
+                  Mode pertinence : <span className="font-semibold">{modeInfo.label}</span>
                   {modeInfo.hint ? (
                     <span className="block text-gray-500/90 mt-0.5">{modeInfo.hint}</span>
                   ) : null}
@@ -340,14 +349,11 @@ function App() {
         )}
 
         {!isLoading && formations.length > 0 && (
-          <div className="px-4 pb-4 animate-in fade-in duration-500">
+          <div className="px-4 pb-4">
             <div className="mb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               {formations.length} formation(s) affichée(s)
-              {typeof searchMeta?.countTotal === "number" &&
-              searchMeta.countTotal !== formations.length ? (
-                <span className="normal-case font-normal ml-1 text-gray-400">
-                  (sur {searchMeta.countTotal})
-                </span>
+              {typeof searchMeta?.countTotal === "number" && searchMeta.countTotal !== formations.length ? (
+                <span className="normal-case font-normal ml-1 text-gray-400">(sur {searchMeta.countTotal})</span>
               ) : null}
             </div>
 
