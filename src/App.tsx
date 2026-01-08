@@ -6,6 +6,8 @@ import { SearchForm } from "./components/SearchForm";
 import { FormationList } from "./components/FormationList";
 import { FormationMap, FormationMapRef } from "./components/FormationMap";
 
+import { geocodeCityToLatLon } from "./services/nominatim";
+
 import { METIERS } from "./types";
 import type {
   Formation,
@@ -111,17 +113,37 @@ function App() {
 
     setRequested({ metierKey, metierLabel, ville: villeClean, niveau });
 
-    const payload = { metier: metierKey, ville: villeClean, niveau };
-
     try {
-      // Debug lisible : tu sauras TOUT DE SUITE si tu appelles le bon backend
+      // 1) Géocodage ville -> lat/lon (obligatoire pour ta Edge Function)
+      const coords = await geocodeCityToLatLon(villeClean);
+
+      if (controller.signal.aborted) return;
+
+      if (!coords) {
+        throw new Error(
+          `Ville introuvable : "${villeClean}". Essaie par ex. "Paris, France" ou "Lyon".`,
+        );
+      }
+
+      // 2) Payload COMPLET attendu par le backend
+      const payload = {
+        metier: metierKey,     // clé (ex: "silo")
+        ville: villeClean,     // texte ville
+        lat: coords.lat,       // ✅ obligatoire
+        lon: coords.lon,       // ✅ obligatoire
+        niveau,                // filtre
+      };
+
+      // Debug lisible
       console.groupCollapsed(
         `%c[SEARCH] ${metierKey} / ${villeClean} / niveau=${niveau}`,
         "color:#74114D;font-weight:bold;",
       );
+      console.log("coords:", coords);
       console.log("payload:", payload);
       console.groupEnd();
 
+      // 3) Appel Edge Function
       const { data, error: functionError } = await supabase.functions.invoke("search-formations", {
         body: payload,
         signal: controller.signal,
@@ -129,7 +151,10 @@ function App() {
 
       if (controller.signal.aborted) return;
 
-      if (functionError) throw new Error(functionError.message || "Erreur de connexion au serveur");
+      if (functionError) {
+        console.error("Function error:", functionError);
+        throw new Error(functionError.message || "Erreur serveur (Edge Function)");
+      }
       if (!data) throw new Error("Réponse serveur vide");
       if (data.error) throw new Error(data.error);
 
@@ -207,11 +232,7 @@ function App() {
     normalizeForSearch(searchMeta?.metier_detecte ?? "") === "recherche generale" ||
     normalizeForSearch(searchMeta?.metier_detecte ?? "") === "recherche générale";
 
-  const mismatchMetier =
-  !!requested &&
-  !!searchMeta &&
-  backendSaysGeneral;
-
+  const mismatchMetier = !!requested && !!searchMeta && backendSaysGeneral;
 
   const emptyStateMessage = useMemo(() => {
     const dbg = searchMeta?.debug;
@@ -260,7 +281,7 @@ function App() {
           </div>
         )}
 
-        {/* ✅ ALERTE MISMATCH METIER (c’est LE symptôme que tu modifies pas le bon endroit / pas déployé) */}
+        {/* ✅ ALERTE MISMATCH METIER */}
         {mismatchMetier && (
           <div className="mx-4 mb-4 bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-xs text-yellow-900">
             <div className="font-bold mb-1">⚠️ Incohérence détectée</div>
@@ -271,8 +292,7 @@ function App() {
               Le backend répond : <b>{searchMeta?.metier_detecte}</b>
             </div>
             <div className="mt-2 text-[11px] text-yellow-800">
-              Ça arrive quand la Function Supabase déployée n’est pas celle que tu modifies (doublon de fichiers, ou
-              function non redéployée).
+              Si ça persiste, c’est côté backend (détection métier / function pas redéployée).
             </div>
           </div>
         )}
@@ -281,7 +301,6 @@ function App() {
         {searchMeta && !isLoading && !error && (
           <div className="mx-4 mb-4 bg-[#47A152]/10 border border-[#47A152]/30 rounded-lg p-3 shadow-sm">
             <div className="space-y-2 text-xs">
-              {/* ✅ affiche aussi métier demandé */}
               {requested && (
                 <div className="flex justify-between items-center border-b border-[#47A152]/20 pb-1">
                   <span className="text-gray-600">Métier demandé :</span>
