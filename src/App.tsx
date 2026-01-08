@@ -125,9 +125,27 @@ function App() {
       });
 
       if (functionError) {
-        // Supabase renvoie souvent un message générique, donc on affiche le + utile
-        throw new Error(functionError.message || "Erreur de connexion au serveur");
-      }
+  console.error("Function error (raw):", functionError);
+
+  // Essaye de récupérer le vrai body renvoyé par la Function (souvent { error, details })
+  const anyErr = functionError as any;
+
+  // selon les versions supabase-js, ça peut être anyErr.context ou anyErr.context.response
+  const ctx = anyErr?.context;
+  const res = ctx?.response ?? ctx;
+
+  if (res) {
+    try {
+      const text = await res.text();
+      console.error("Function response body:", text);
+    } catch (e) {
+      console.error("Could not read function response body:", e);
+    }
+  }
+
+  throw new Error(anyErr?.message || "Erreur serveur (Edge Function)");
+}
+
 
       if (!data) throw new Error("Réponse serveur vide");
       if ((data as any).error) throw new Error((data as any).error);
