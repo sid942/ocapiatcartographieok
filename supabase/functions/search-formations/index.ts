@@ -15,7 +15,7 @@ import { searchRefEA } from "./refeaSearch.ts";
  * ✅ VF ULTRA ROBUSTE / ZÉRO HORS-SUJET / ZÉRO "HONTE"
  *
  * Principes :
- * - RefEA = source #1 (socle) -> Filtrée par refeaRules.ts
+ * - RefEA = source #1 (socle) -> Filtrée par refeaRules.ts (ne pas re-filtrer ici)
  * - LBA = source principale "grand public" -> Filtrée par HARD_RULES_BY_JOB ici
  * - Perplexity = complément seulement si nécessaire -> Filtrée par HARD_RULES_BY_JOB ici
  */
@@ -77,7 +77,7 @@ function cleanText(text: string | null | undefined): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['']/g, " ")
+    .replace(/[’']/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -125,9 +125,6 @@ function normalizeNiveauFilter(n: any): NiveauFiltre {
   return "all";
 }
 
-/**
- * Détection de niveau améliorée (alignée avec RefEA)
- */
 function inferNiveau(diplomaLevel: any, title: string): string {
   const dl = (diplomaLevel ?? "").toString().trim();
   if (dl === "3" || dl === "4" || dl === "5" || dl === "6") return dl;
@@ -204,7 +201,7 @@ function isThemeBanned(jobKey: string, fullText: string): boolean {
 }
 
 // ==================================================================================
-// 3bis) HARD FILTER METIER (POUR LBA & PERPLEXITY)
+// 3bis) HARD FILTER METIER (POUR LBA & PERPLEXITY UNIQUEMENT)
 // ==================================================================================
 
 type HardRules = {
@@ -223,6 +220,7 @@ function countHitsList(fullText: string, list?: string[]): number {
 }
 
 function shouldKeepByHardRules(jobKey: string, title: string, org: string): boolean {
+  // CRUCIAL : On nettoie le texte avant comparaison (lowercase + sans accents)
   const fullText = cleanText(`${title} ${org}`);
   const rules = HARD_RULES_BY_JOB[jobKey] ?? HARD_RULES_BY_JOB.default;
 
@@ -248,20 +246,19 @@ const HARD_RULES_BY_JOB: Record<string, HardRules> = {
   },
 
   silo: {
-    // ✅ CORRIGÉ : Ajout de "industries agro" pour matcher LBA comme RefEA
-    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "tri", "reception", "expedition", "élévateur", "elevateur", "industries agroalimentaires", "bio industries", "conduite de systemes industriels", "transformation"],
+    // Élargi pour inclure l'agroalimentaire et la transformation (comme RefEA)
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "tri", "reception", "expedition", "élévateur", "elevateur", "industries agroalimentaires", "bio industries", "conduite de systemes industriels", "transformation", "grandes cultures"],
     must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
   },
 
   responsable_silo: {
-     // ✅ CORRIGÉ
-    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "qualite", "qualité", "reception", "expedition", "stocks", "industries agroalimentaires"],
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "qualite", "qualité", "reception", "expedition", "stocks", "industries agroalimentaires", "management"],
     must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
   },
 
   technicien_culture: {
     must_any: ["culture", "maraichage", "maraîchage", "grandes cultures", "agronomie", "sol", "fertilisation", "phyto", "phytosanitaire", "itineraire technique", "itinéraire technique", "production vegetale"],
-    must_none: ["amenagements paysagers", "aménagements paysagers", "paysage", "paysager", "foret", "sylviculture"],
+    must_none: ["amenagements paysagers", "aménagements paysagers", "paysage", "paysager", "foret", "sylviculture", "mesures physiques"],
   },
 
   conducteur_ligne: {
@@ -269,11 +266,15 @@ const HARD_RULES_BY_JOB: Record<string, HardRules> = {
   },
 
   controleur_qualite: {
-    must_any: ["qualite", "qualité", "controle", "contrôle", "haccp", "tracabilite", "traçabilité", "laboratoire", "analyse", "audit"],
+    must_any: ["qualite", "qualité", "controle", "contrôle", "haccp", "tracabilite", "traçabilité", "laboratoire", "analyse", "audit", "bioanalyse"],
+    // Anti "Mesures physiques"
+    must_none: ["mesures physiques", "instrumentation", "electronique"],
   },
 
   agreeur: {
-    must_any: ["agreeur", "agréeur", "agreage", "agréage", "fruits", "legumes", "légumes", "calibrage", "produits frais", "tri", "reception"],
+    must_any: ["agreeur", "agréeur", "agreage", "agréage", "fruits", "legumes", "légumes", "calibrage", "produits frais", "tri", "qualite"],
+    // Anti "Logistique pure"
+    must_none: ["logistique", "transport", "entrepot", "magasinier"],
   },
 
   responsable_logistique: {
@@ -281,7 +282,8 @@ const HARD_RULES_BY_JOB: Record<string, HardRules> = {
   },
 
   magasinier_cariste: {
-    must_any: ["cariste", "caces", "chariot", "magasinier", "preparation", "préparation", "commandes", "picking", "manutention"],
+    // Ajout de "logistique" pour élargir
+    must_any: ["cariste", "caces", "chariot", "magasinier", "preparation", "préparation", "commandes", "picking", "manutention", "logistique", "entrepot", "quai"],
   },
 
   maintenance: {
@@ -947,7 +949,7 @@ Deno.serve(async (req: Request) => {
     const villeRef = geo.villeRef;
 
     // ✅ 0) REFEA D'ABORD
-    // On ne filtre plus RefEA ici, car searchRefEA utilise déjà les règles "Blindées" de refeaRules.ts
+    // On ne re-filtre PAS ici avec HARD_RULES, car refeaSearch le fait déjà mieux.
     const refeaResults = searchRefEA({
       jobLabel: config.label,
       ville: villeRef,
@@ -1002,7 +1004,7 @@ Deno.serve(async (req: Request) => {
       };
     });
 
-    // ✅ HARD FILTER métier sur LBA
+    // ✅ HARD FILTER métier sur LBA (uniquement LBA)
     const mappedLBAFiltered = mappedLBA.filter((f: any) => shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? ""));
     mapped = mergeFormationsWithoutDuplicates(mapped, mappedLBAFiltered);
 
@@ -1019,6 +1021,7 @@ Deno.serve(async (req: Request) => {
         const pplxSafe = (pplxRaw || []).filter((f: any) => f && typeof f?.distance_km === "number").filter((f: any) => f.distance_km >= 0 && f.distance_km < 900).filter((f: any) => f.distance_km <= hardCap).map((f: any) => ({
           ...f, alternance: "Non renseigné", modalite: "Non renseigné", rncp: "Non renseigné", match: { score: PERPLEXITY_SCORE, reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length ? f.match.reasons.slice(0, MAX_WHY_REASONS) : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS) },
         }));
+        // Filtre aussi Perplexity avec les règles strictes
         const pplxFinal = pplxSafe.filter((f: any) => shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? ""));
         if (pplxFinal.length > 0) {
           perplexityUsed = true;
@@ -1027,10 +1030,15 @@ Deno.serve(async (req: Request) => {
       } catch (error) { console.error("Perplexity enrichment failed:", error); }
     }
 
+    // ✅ DÉFINITION CORRECTE AVANT UTILISATION
+    const count_total_avant_filtre = allFormations.length;
+
     let results = allFormations;
     if (niveauFiltre !== "all") {
       results = results.filter((r: any) => r.niveau === niveauFiltre);
     }
+    
+    // Tri final
     results.sort((a: any, b: any) => {
       const sa = a?.match?.score ?? 0;
       const sb = b?.match?.score ?? 0;
@@ -1042,9 +1050,20 @@ Deno.serve(async (req: Request) => {
 
     const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
     const maxDist = results.reduce((m: number, r: any) => { const d = typeof r?.distance_km === "number" ? r.distance_km : 999; return Math.max(m, d); }, 0);
+    
     return new Response(JSON.stringify({
-      metier_detecte: config.label, ville_reference: villeRef, rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`, niveau_filtre: niveauFiltre, mode, count_total: allFormations.length, count: results.length, formations: results, warnings: { far_results: maxDist > soft, geocode_score: geo.geoScore, geocode_type: geo.geoTypeTried, no_relevant_results: results.length === 0, absolute_min_score: ABSOLUTE_MIN_SCORE }, debug: { jobKey, ...debug, strict_count: strictKept.length, perplexity_enrichment_used: perplexityUsed, hard_filter_enabled: true },
+      metier_detecte: config.label, 
+      ville_reference: villeRef, 
+      rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`, 
+      niveau_filtre: niveauFiltre, 
+      mode, 
+      count_total: count_total_avant_filtre, // UTILISATION SÛRE
+      count: results.length, 
+      formations: results, 
+      warnings: { far_results: maxDist > soft, geocode_score: geo.geoScore, geocode_type: geo.geoTypeTried, no_relevant_results: results.length === 0, absolute_min_score: ABSOLUTE_MIN_SCORE }, 
+      debug: { jobKey, ...debug, strict_count: strictKept.length, perplexity_enrichment_used: perplexityUsed, hard_filter_enabled: true },
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error?.message || "Erreur inconnue" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
