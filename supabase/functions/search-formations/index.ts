@@ -5,6 +5,7 @@ import {
   mergeFormationsWithoutDuplicates,
   type PerplexityFormationInput,
 } from "./perplexity_enrich.ts";
+import { searchRefEA } from "./refeaSearch.ts";
 
 /**
  * OCAPIAT - Search Formations (LBA) + Perplexity Enrichment
