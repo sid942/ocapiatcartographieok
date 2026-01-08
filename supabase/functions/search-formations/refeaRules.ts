@@ -176,55 +176,93 @@ export const REFEA_RULES: Record<string, Rules> = {
    * => on oblige des signaux agro/tech + on bannit marketing/digital trop génériques.
    */
   technico: {
-    mustAny: M([
-      // technico-commercial "vrai"
-      "technico",
-      "negociateur technico",
-      "négociateur technico",
-      "conseil et commercialisation",
-      "solutions techniques",
-      "conseil vente",
-      // signaux agri / filière
-      "agrofourniture",
-      "intrants",
-      "semences",
-      "engrais",
-      "phytosanitaire",
-      "nutrition animale",
-      "cooperative",
-      "coopérative",
-      "negoce agricole",
-      "négoce agricole",
-      "biens services pour l agriculture",
-      "alimentation et boissons",
-      "distribution agricole",
-    ]),
-    forbidAny: F(
-      [ ...NO_SCHOOL ],
-      [ ...NO_OFFTOPIC_COMMON ],
-      // anti “commerce pur / marketing pur”
-      [
-        "marketing",
-        "acquisition",
-        "digital",
-        "e commerce",
-        "e-commerce",
-        "communication",
-        "community manager",
-        "ux",
-        "ui",
-        "growth",
-        "business developer",
-        "business development",
-        "immobilier",
-        "assurance",
-        "banque",
-      ],
-      // anti vin/boissons si tu considères que c'est hors scope OCAPIAT pour technico
-      // (si tu veux les garder, supprime NO_WINE ici)
-      [ ...NO_WINE ],
-    ),
-  },
+  mustAny: F([
+    // technico-commercial "vrai"
+    "technico",
+    "technico commercial",
+    "technico-commercial",
+    "negociateur technico",
+    "négociateur technico",
+    "negociateur technico commercial",
+    "négociateur technico commercial",
+    "conseil et commercialisation",
+    "commercialisation de solutions techniques",
+    "solutions techniques",
+    "conseil vente",
+    "conseiller vente",
+    "vente conseil",
+
+    // signaux agri / filière (OCAPIAT)
+    "agrofourniture",
+    "intrants",
+    "semences",
+    "engrais",
+    "phytosanitaire",
+    "nutrition animale",
+    "cooperative",
+    "coopérative",
+    "negoce agricole",
+    "négoce agricole",
+    "distribution agricole",
+
+    // BTSA technico spé (RefEA)
+    "biens, services pour l agriculture",
+    "biens services pour l agriculture",
+    "alimentation et boissons",
+  ]),
+  forbidAny: F(
+    [...NO_SCHOOL],
+    [...NO_OFFTOPIC_COMMON],
+
+    // anti “commerce pur / marketing pur” (ce qui te pollue Paris)
+    [
+      "marketing",
+      "acquisition",
+      "digital",
+      "numerique",
+      "numérique",
+      "e commerce",
+      "e-commerce",
+      "communication",
+      "community manager",
+      "ux",
+      "ui",
+      "growth",
+      "influence",
+      "brand",
+      "marque",
+    ],
+
+    // anti intitulés trop génériques “commerce pur”
+    [
+      "business developer",
+      "business development",
+      "developpement commercial",
+      "développement commercial",
+      "responsable du developpement commercial",
+      "responsable du développement commercial",
+      "ingenierie d affaires",
+      "ingénierie d affaires",
+      "charge d affaires",
+      "chargé d affaires",
+      "conseiller commercial",
+      "conseiller clientèle",
+      "commercial terrain",
+      "commercial b to c",
+      "commercial b2c",
+    ],
+
+    // anti secteurs hors scope
+    [
+      "immobilier",
+      "assurance",
+      "banque",
+      "finance",
+      "courtier",
+    ],
+  ),
+},
+
 
   /**
    * COMMERCIAL EXPORT
