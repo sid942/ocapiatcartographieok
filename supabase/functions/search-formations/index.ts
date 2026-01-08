@@ -869,157 +869,272 @@ Deno.serve(async (req: Request) => {
     }
 
     // Cap LBA
-    if (mergedLBA.length > LBA_MAX) mergedLBA = mergedLBA.slice(0, LBA_MAX);
+    // Cap LBA
+if (mergedLBA.length > LBA_MAX) mergedLBA = mergedLBA.slice(0, LBA_MAX);
 
-    const mappedLBA = mergedLBA.map((s) => {
-      const computedNiveau = inferNiveau(s.diplomaLevel, s.title);
-      const distRounded = s.distanceKm === null ? 999 : round1(s.distanceKm);
+const mappedLBA = mergedLBA.map((s) => {
+  const computedNiveau = inferNiveau(s.diplomaLevel, s.title);
+  const distRounded = s.distanceKm === null ? 999 : round1(s.distanceKm);
 
-      return {
-        id: s.id,
-        intitule: s.title,
-        organisme: s.companyName,
-        ville: s.city ?? villeRef,
-        lat: s.lat ?? undefined,
-        lon: s.lon ?? undefined,
-        distance_km: distRounded,
-        rncp: "Non renseigné",
-        modalite: "Non renseigné",
-        alternance: "Non renseigné",
-        categorie: "Diplôme / Titre",
-        site_web: s.url,
-        url: s.url,
-        niveau: computedNiveau,
-        match: { score: s.score, reasons: s.reasons },
-        _source: "lba",
-      };
-    });
+  return {
+    id: s.id,
+    intitule: s.title,
+    organisme: s.companyName,
+    ville: s.city ?? villeRef,
+    lat: s.lat ?? undefined,
+    lon: s.lon ?? undefined,
+    distance_km: distRounded,
+    rncp: "Non renseigné",
+    modalite: "Non renseigné",
+    alternance: "Non renseigné",
+    categorie: "Diplôme / Titre",
+    site_web: s.url,
+    url: s.url,
+    niveau: computedNiveau,
+    match: { score: s.score, reasons: s.reasons },
+    _source: "lba",
+  };
+});
 
-    // ==================================================================================
-    // 2) MERGE : RefEA + LBA (dedup)
-    // RefEA a déjà les bons filtres, on garde.
-    // ==================================================================================
-    let allFormations = mergeFormationsWithoutDuplicates(refeaResults, mappedLBA);
+// ==================================================================================
+// 2) FILTRE LBA (ADAPTATIF HARD -> SOFT) + MERGE RefEA + LBA
+// RefEA est déjà clean côté refeaSearch.ts, on ne touche pas.
+// ==================================================================================
 
-    // ==================================================================================
-    // 3) PERPLEXITY (complément discipliné)
-    // ==================================================================================
-    let perplexityUsed = false;
+const targetLocal = Math.max(6, config.target_min_results || 8);
 
+// HARD (strict) : priorité zéro hors sujet
+const lbaHard = mappedLBA.filter((f: any) =>
+  shouldKeepByHardRules(config.key, f?.intitule ?? "", f?.organisme ?? "")
+);
+
+// SOFT : si HARD vide trop, on garde seulement les meilleurs + signaux métier
+function lbaSoftKeep(f: any): boolean {
+  const title = cleanText(f?.intitule ?? "");
+  const org = cleanText(f?.organisme ?? "");
+  const txt = `${title} ${org}`.trim();
+  const score = f?.match?.score ?? 0;
+
+  // ⚠️ Cas sensibles : technico = on évite "commerce" générique
+  if (config.key === "technico") {
+    // signal fort technico / vente B2B / solutions techniques
+    if (txt.includes("technico")) return true;
+    if (txt.includes("negociateur technico")) return true;
+    if (txt.includes("commercialisation de solutions techniques")) return true;
+    if (txt.includes("solutions techniques")) return true;
+
+    // si c’est juste "commercial" / "developpement commercial" sans technico => rejet
+    const genericCommercial =
+      txt.includes("developpement commercial") ||
+      txt.includes("responsable du developpement commercial") ||
+      txt.includes("conseiller commercial") ||
+      txt.includes("charge d affaires") ||
+      txt.includes("business developer") ||
+      txt.includes("ingenierie d affaires") ||
+      txt.includes("marketing");
+
+    if (genericCommercial && !txt.includes("technico")) return false;
+
+    // sinon on garde uniquement si score déjà haut
+    return score >= 28;
+  }
+
+  // chauffeur : éviter "conduite et gestion de l'entreprise agricole" hors engins
+  if (config.key === "chauffeur") {
+    const hasMachines =
+      txt.includes("tracteur") ||
+      txt.includes("machinisme") ||
+      txt.includes("machines agricoles") ||
+      txt.includes("agroequipement") ||
+      txt.includes("agro equipement") ||
+      txt.includes("moissonneuse") ||
+      txt.includes("ensileuse") ||
+      txt.includes("pulverisateur") ||
+      txt.includes("pilotage de machines") ||
+      txt.includes("conduite d engins");
+    if (hasMachines) return true;
+
+    // "conduite et gestion de l'entreprise agricole" = pas chauffeur
+    if (txt.includes("conduite et gestion de l entreprise agricole")) return false;
+    return score >= 30;
+  }
+
+  // silo / responsable silo : anti eau + garder stockage céréales
+  if (config.key === "silo" || config.key === "responsable_silo") {
+    if (txt.includes("eau") || txt.includes("assainissement") || txt.includes("hydraulique")) return false;
     if (
-      shouldEnrichWithPerplexity(allFormations, {
-        min_results: MIN_RESULTS_BEFORE_ENRICH,
-        max_distance: MAX_AVG_DISTANCE_BEFORE_ENRICH,
-      })
-    ) {
-      try {
-        const missing = Math.max(0, MIN_RESULTS_BEFORE_ENRICH - allFormations.length);
-        const perplexityInput: PerplexityFormationInput = {
-          metierLabel: config.label,
-          villeRef,
-          lat: userLat,
-          lon: userLon,
-          limit: Math.max(3, Math.min(PPLX_MAX, missing || 5)),
-        };
+      txt.includes("silo") ||
+      txt.includes("cereales") ||
+      txt.includes("grain") ||
+      txt.includes("stockage") ||
+      txt.includes("collecte") ||
+      txt.includes("sechage") ||
+      txt.includes("reception") ||
+      txt.includes("expedition")
+    ) return true;
+    return score >= 30;
+  }
 
-        const pplxRaw = await fetchPerplexityFormations(perplexityInput);
-        const hardCap = getPerplexityHardCap(config);
+  // technicien culture : éviter forêt / bûcheronnage / viticulture si hors scope
+  if (config.key === "technicien_culture") {
+    if (txt.includes("foret") || txt.includes("sylviculture") || txt.includes("bucheronnage")) return false;
+    if (txt.includes("viticulture") || txt.includes("oenologie") || txt.includes("vigne")) return false;
+    if (
+      txt.includes("agronomie") ||
+      txt.includes("grandes cultures") ||
+      txt.includes("maraichage") ||
+      txt.includes("fertilisation") ||
+      txt.includes("itineraire technique") ||
+      txt.includes("production vegetale")
+    ) return true;
+    return score >= 26;
+  }
 
-        // Safe + hard filter métier
-        const pplxFinal = (pplxRaw || [])
-          .filter((f: any) => f && typeof f?.distance_km === "number")
-          .filter((f: any) => f.distance_km >= 0 && f.distance_km <= hardCap)
-          .filter((f: any) => shouldKeepByHardRules(config.key, f?.intitule ?? "", f?.organisme ?? ""))
-          .slice(0, PPLX_MAX)
-          .map((f: any) => ({
-            ...f,
-            alternance: "Non renseigné",
-            modalite: "Non renseigné",
-            rncp: "Non renseigné",
-            match: {
-              score: PERPLEXITY_SCORE,
-              reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length
-                ? f.match.reasons.slice(0, MAX_WHY_REASONS)
-                : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
-            },
-            _source: "perplexity",
-          }));
+  // défaut : on ne garde qu’un minimum de qualité
+  return score >= 24;
+}
 
-        if (pplxFinal.length > 0) {
-          perplexityUsed = true;
-          allFormations = mergeFormationsWithoutDuplicates(allFormations, pplxFinal);
-        }
-      } catch (error) {
-        console.error("Perplexity enrichment failed:", error);
-      }
-    }
+// Choix final LBA : HARD si suffisant, sinon SOFT, sinon top score
+const lbaFinal = (() => {
+  const minWanted = Math.max(6, Math.floor(targetLocal / 2));
+  if (lbaHard.length >= minWanted) return lbaHard;
 
-    // ==================================================================================
-    // 4) FILTRE NIVEAU + TRI FINAL + CAP GLOBAL
-    // ==================================================================================
-    const count_total_avant_filtre = allFormations.length;
+  const soft = mappedLBA.filter(lbaSoftKeep);
+  if (soft.length > 0) return soft;
 
-    let results = allFormations;
+  return mappedLBA
+    .slice()
+    .sort((a: any, b: any) => (b?.match?.score ?? 0) - (a?.match?.score ?? 0))
+    .slice(0, minWanted);
+})();
 
-    if (niveauFiltre !== "all") {
-      results = results.filter((r: any) => r.niveau === niveauFiltre);
-    }
+// MERGE RefEA + LBA filtré
+let allFormations = mergeFormationsWithoutDuplicates(refeaResults, lbaFinal);
 
-    // Tri : score desc, distance asc
-    results.sort((a: any, b: any) => {
-      const sa = a?.match?.score ?? 0;
-      const sb = b?.match?.score ?? 0;
-      if (sb !== sa) return sb - sa;
+// ==================================================================================
+// 3) PERPLEXITY (complément discipliné) — HARD puis SOFT si vide
+// ==================================================================================
+let perplexityUsed = false;
 
-      const da = typeof a.distance_km === "number" ? a.distance_km : 9999;
-      const db = typeof b.distance_km === "number" ? b.distance_km : 9999;
-      return da - db;
-    });
+if (
+  shouldEnrichWithPerplexity(allFormations, {
+    min_results: MIN_RESULTS_BEFORE_ENRICH,
+    max_distance: MAX_AVG_DISTANCE_BEFORE_ENRICH,
+  })
+) {
+  try {
+    const missing = Math.max(0, MIN_RESULTS_BEFORE_ENRICH - allFormations.length);
+    const perplexityInput: PerplexityFormationInput = {
+      metierLabel: config.label,
+      villeRef,
+      lat: userLat,
+      lon: userLon,
+      limit: Math.max(3, Math.min(PPLX_MAX, missing || 5)),
+    };
 
-    // Cap final
-    if (results.length > cap) results = results.slice(0, cap);
+    const pplxRaw = await fetchPerplexityFormations(perplexityInput);
+    const hardCap = getPerplexityHardCap(config);
 
-    // Warning distance
-    const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
-    const maxDist = results.reduce((m: number, r: any) => {
-      const d = typeof r?.distance_km === "number" ? r.distance_km : 999;
-      return Math.max(m, d);
-    }, 0);
-
-    return new Response(
-      JSON.stringify({
-        metier_detecte: config.label,
-        ville_reference: villeRef,
-        rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`,
-        niveau_filtre: niveauFiltre,
-        mode,
-        count_total: count_total_avant_filtre,
-        count: results.length,
-        formations: results,
-        warnings: {
-          far_results: maxDist > soft,
-          geocode_score: geo.geoScore,
-          geocode_type: geo.geoTypeTried,
-          no_relevant_results: results.length === 0,
-          absolute_min_score: ABSOLUTE_MIN_SCORE,
+    const pplxSafe = (pplxRaw || [])
+      .filter((f: any) => f && typeof f?.distance_km === "number")
+      .filter((f: any) => f.distance_km >= 0 && f.distance_km <= hardCap)
+      .slice(0, PPLX_MAX)
+      .map((f: any) => ({
+        ...f,
+        alternance: "Non renseigné",
+        modalite: "Non renseigné",
+        rncp: "Non renseigné",
+        match: {
+          score: PERPLEXITY_SCORE,
+          reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length
+            ? f.match.reasons.slice(0, MAX_WHY_REASONS)
+            : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
         },
-        debug: DEBUG
-          ? {
-              jobKey,
-              ...debug,
-              strict_count: strictKept.length,
-              perplexity_enrichment_used: perplexityUsed,
-              hard_filter_enabled: true,
-              caps: { cap, REFEA_MAX, LBA_MAX, PPLX_MAX },
-            }
-          : undefined,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        _source: "perplexity",
+      }));
+
+    const pplxHard = pplxSafe.filter((f: any) =>
+      shouldKeepByHardRules(config.key, f?.intitule ?? "", f?.organisme ?? "")
     );
-  } catch (error: any) {
-    return new Response(
-      JSON.stringify({ error: error?.message || "Erreur inconnue" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+
+    const pplxFinal = (() => {
+      if (pplxHard.length > 0) return pplxHard;
+      const soft = pplxSafe.filter(lbaSoftKeep); // même soft que LBA => cohérence
+      return soft.length > 0 ? soft : [];
+    })();
+
+    if (pplxFinal.length > 0) {
+      perplexityUsed = true;
+      allFormations = mergeFormationsWithoutDuplicates(allFormations, pplxFinal);
+    }
+  } catch (error) {
+    console.error("Perplexity enrichment failed:", error);
+  }
+}
+
+// ==================================================================================
+// 4) FILTRE NIVEAU + TRI FINAL + CAP GLOBAL
+// ==================================================================================
+const count_total_avant_filtre = allFormations.length;
+
+let results = allFormations;
+
+if (niveauFiltre !== "all") {
+  results = results.filter((r: any) => r.niveau === niveauFiltre);
+}
+
+// Tri : score desc, distance asc
+results.sort((a: any, b: any) => {
+  const sa = a?.match?.score ?? 0;
+  const sb = b?.match?.score ?? 0;
+  if (sb !== sa) return sb - sa;
+
+  const da = typeof a.distance_km === "number" ? a.distance_km : 9999;
+  const db = typeof b.distance_km === "number" ? b.distance_km : 9999;
+  return da - db;
+});
+
+// Cap final
+if (results.length > cap) results = results.slice(0, cap);
+
+// Warning distance
+const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
+const maxDist = results.reduce((m: number, r: any) => {
+  const d = typeof r?.distance_km === "number" ? r.distance_km : 999;
+  return Math.max(m, d);
+}, 0);
+
+return new Response(
+  JSON.stringify({
+    metier_detecte: config.label,
+    ville_reference: villeRef,
+    rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`,
+    niveau_filtre: niveauFiltre,
+    mode,
+    count_total: count_total_avant_filtre,
+    count: results.length,
+    formations: results,
+    warnings: {
+      far_results: maxDist > soft,
+      geocode_score: geo.geoScore,
+      geocode_type: geo.geoTypeTried,
+      no_relevant_results: results.length === 0,
+      absolute_min_score: ABSOLUTE_MIN_SCORE,
+    },
+    debug: DEBUG
+      ? {
+          jobKey,
+          ...debug,
+          strict_count: strictKept.length,
+          perplexity_enrichment_used: perplexityUsed,
+          hard_filter_enabled: true,
+          caps: { cap, REFEA_MAX, LBA_MAX, PPLX_MAX },
+          lba_counts: { mapped: mappedLBA.length, hard: lbaHard.length, final: lbaFinal.length },
+        }
+      : undefined,
+  }),
+  { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+);
+
   }
 });
