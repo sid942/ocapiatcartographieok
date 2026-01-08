@@ -79,7 +79,7 @@ function cleanText(text: string | null | undefined): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[’']/g, " ")
+    .replace(/['']/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -851,16 +851,12 @@ Deno.serve(async (req: Request) => {
 
         const raw = await fetchPerplexityFormations(pplxInput);
 
-const perplexityResults = (raw || []).filter((f: any) =>
-  filterByTrainingWhitelist(config.key, f?.intitule ?? "", f?.organisme ?? "")
-);
-
-
-        // Nettoyage minimal + hard cap distance
+        // Nettoyage minimal + hard cap distance + whitelist
         const hardCap = getPerplexityHardCap(config);
         perplexityResults = (Array.isArray(raw) ? raw : [])
           .filter((f: any) => f && typeof f?.distance_km === "number")
           .filter((f: any) => f.distance_km >= 0 && f.distance_km <= hardCap)
+          .filter((f: any) => filterByTrainingWhitelist(config.key, f?.intitule ?? "", f?.organisme ?? ""))
           .map((f: any) => ({
             ...f,
             rncp: f?.rncp ?? "Non renseigné",
@@ -876,15 +872,8 @@ const perplexityResults = (raw || []).filter((f: any) =>
           }))
           .slice(0, PPLX_MAX);
 
-        // ✅ Whitelist catalogue Excel (Perplexity)
-        const pplxWhitelisted = filterByTrainingWhitelist(
-          config.key,
-          perplexityResults,
-          (f: any) => String(f?.intitule ?? ""),
-        );
-
-        if (pplxWhitelisted.length > 0) {
-          allFormations = mergeFormationsWithoutDuplicates(allFormations, pplxWhitelisted);
+        if (perplexityResults.length > 0) {
+          allFormations = mergeFormationsWithoutDuplicates(allFormations, perplexityResults);
         }
       } catch (e) {
         console.error("[Perplexity] Error:", e);
