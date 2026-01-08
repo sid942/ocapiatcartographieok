@@ -48,7 +48,6 @@ interface JobProfile {
 }
 
 const DEBUG = false;
-
 const FETCH_TIMEOUT_MS = 10_000;
 
 // Score constants
@@ -147,14 +146,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
       "négoce agricole",
     ],
     weak_keywords: ["commerce", "vente", "commercial"],
-    context_keywords: [
-      "agricole",
-      "agri",
-      "agriculture",
-      "agroalimentaire",
-      "alimentaire",
-      "distribution",
-    ],
+    context_keywords: ["agricole", "agri", "agriculture", "agroalimentaire", "alimentaire", "distribution"],
     banned_keywords: [
       "marketing",
       "digital",
@@ -189,13 +181,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     romes: ["D1407", "D1406"],
     fallback_romes: ["D1401"],
     radius_km: 150,
-    strong_keywords: [
-      "export",
-      "international",
-      "commerce international",
-      "import export",
-      "import-export",
-    ],
+    strong_keywords: ["export", "international", "commerce international", "import export", "import-export"],
     synonyms: ["douane", "incoterms", "anglais", "negociation internationale", "négociation internationale"],
     weak_keywords: ["commerce", "commercial", "vente"],
     context_keywords: ["logistique internationale", "export"],
@@ -229,16 +215,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     ],
     weak_keywords: ["magasinage", "tri", "elevateur", "élévateur"],
     context_keywords: ["cgea", "industries agroalimentaires"],
-    banned_keywords: [
-      "eau",
-      "assainissement",
-      "gemeau",
-      "gém eau",
-      "elevage",
-      "élevage",
-      "bovin",
-      "porcin",
-    ],
+    banned_keywords: ["eau", "assainissement", "gemeau", "gém eau", "elevage", "élevage", "bovin", "porcin"],
     banned_phrases: ["gestion de l eau", "gestion de l'eau"],
     min_score: 20,
     relaxed_min_score: 14,
@@ -254,15 +231,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     romes: ["N1103", "A1416"],
     fallback_romes: ["N1301", "H2301"],
     radius_km: 100,
-    strong_keywords: [
-      "silo",
-      "cereales",
-      "céréales",
-      "grain",
-      "responsable",
-      "chef",
-      "management",
-    ],
+    strong_keywords: ["silo", "cereales", "céréales", "grain", "responsable", "chef", "management"],
     synonyms: ["collecte", "stockage", "qualite", "qualité", "logistique", "approvisionnement"],
     weak_keywords: ["reception", "réception", "expedition", "expédition"],
     context_keywords: ["cgea", "grandes cultures"],
@@ -276,6 +245,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     hard_distance_cap_km: 300,
   },
 
+  // ✅ FIX IMPORTANT : "conduite" ne doit PAS être un strong_keyword (trop générique)
   chauffeur: {
     key: "chauffeur",
     label: "Chauffeur agricole",
@@ -284,33 +254,21 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     radius_km: 70,
     strong_keywords: [
       "chauffeur",
-      "conduite",
       "tracteur",
+      "moissonneuse",
       "machinisme",
-      "agroequipement",
-      "agro equipement",
-    ],
-    synonyms: [
       "machines agricoles",
       "travaux mecanises",
       "travaux mécanisés",
-      "recolte",
-      "récolte",
-      "moissonneuse",
+      "agroequipement",
+      "agro equipement",
+      "pulverisateur",
+      "pulvérisateur",
     ],
-    weak_keywords: ["benne", "remorque", "pulverisateur", "pulvérisateur"],
+    synonyms: ["recolte", "récolte", "benne", "remorque"],
+    weak_keywords: ["conduite"], // ✅ “faible” uniquement
     context_keywords: ["cgea", "grandes cultures"],
-    banned_keywords: [
-      "taxi",
-      "vtc",
-      "bus",
-      "autocar",
-      "voyageurs",
-      "btp",
-      "travaux publics",
-      "routier",
-      "poids lourd",
-    ],
+    banned_keywords: ["taxi", "vtc", "bus", "autocar", "voyageurs", "btp", "travaux publics", "routier", "poids lourd"],
     banned_phrases: ["transport de personnes", "transport routier"],
     min_score: 19,
     relaxed_min_score: 13,
@@ -326,15 +284,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     romes: ["N1301", "N1303"],
     fallback_romes: ["N1302"],
     radius_km: 120,
-    strong_keywords: [
-      "logistique",
-      "supply chain",
-      "stocks",
-      "flux",
-      "entrepot",
-      "entrepôt",
-      "responsable",
-    ],
+    strong_keywords: ["logistique", "supply chain", "stocks", "flux", "entrepot", "entrepôt", "responsable"],
     synonyms: ["expedition", "expédition", "reception", "réception", "approvisionnement", "planning"],
     weak_keywords: ["wms", "transport", "exploitation"],
     context_keywords: [],
@@ -354,14 +304,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     romes: ["N1103", "N1105"],
     fallback_romes: ["N1101"],
     radius_km: 80,
-    strong_keywords: [
-      "cariste",
-      "caces",
-      "chariot",
-      "chariot elevateur",
-      "chariot élévateur",
-      "magasinier",
-    ],
+    strong_keywords: ["cariste", "caces", "chariot", "chariot elevateur", "chariot élévateur", "magasinier"],
     synonyms: ["entrepot", "entrepôt", "logistique", "stock", "preparation", "préparation", "picking"],
     weak_keywords: ["manutention", "quai", "emballage"],
     context_keywords: [],
@@ -381,27 +324,11 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     romes: ["I1304", "I1302"],
     fallback_romes: ["I1305"],
     radius_km: 100,
-    strong_keywords: [
-      "maintenance",
-      "electromecanique",
-      "électromécanique",
-      "mecanique",
-      "mécanique",
-      "automatisme",
-    ],
+    strong_keywords: ["maintenance", "electromecanique", "électromécanique", "mecanique", "mécanique", "automatisme"],
     synonyms: ["electrique", "électrique", "industrie", "industrielle", "depannage", "dépannage"],
     weak_keywords: ["robotique"],
     context_keywords: ["maintenance industrielle"],
-    banned_keywords: [
-      "informatique",
-      "reseaux",
-      "réseaux",
-      "telecom",
-      "télécom",
-      "cyber",
-      "data",
-      "automobile",
-    ],
+    banned_keywords: ["informatique", "reseaux", "réseaux", "telecom", "télécom", "cyber", "data", "automobile"],
     banned_phrases: ["systemes d information", "systèmes d'information", "motoculture de plaisance"],
     min_score: 17,
     relaxed_min_score: 12,
@@ -457,25 +384,11 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     romes: ["H2301", "H2102"],
     fallback_romes: ["H2101"],
     radius_km: 100,
-    strong_keywords: [
-      "conducteur de ligne",
-      "conduite de ligne",
-      "production",
-      "conditionnement",
-      "process",
-    ],
+    strong_keywords: ["conducteur de ligne", "conduite de ligne", "production", "conditionnement", "process"],
     synonyms: ["reglage", "réglage", "transformation", "operateur", "opérateur", "agroalimentaire"],
     weak_keywords: ["alimentaire", "industries agroalimentaires"],
     context_keywords: [],
-    banned_keywords: [
-      "elevage",
-      "élevage",
-      "viticulture",
-      "vigne",
-      "vin",
-      "horticulture",
-      "paysage",
-    ],
+    banned_keywords: ["elevage", "élevage", "viticulture", "vigne", "vin", "horticulture", "paysage"],
     banned_phrases: [],
     min_score: 17,
     relaxed_min_score: 12,
@@ -491,22 +404,8 @@ const JOB_PROFILES: Record<string, JobProfile> = {
     romes: ["A1301", "A1303"],
     fallback_romes: ["A1101"],
     radius_km: 100,
-    strong_keywords: [
-      "technicien culture",
-      "culture",
-      "agronomie",
-      "maraichage",
-      "maraîchage",
-      "grandes cultures",
-    ],
-    synonyms: [
-      "production vegetale",
-      "production végétale",
-      "sol",
-      "fertilisation",
-      "irrigation",
-      "phytosanitaire",
-    ],
+    strong_keywords: ["technicien culture", "culture", "agronomie", "maraichage", "maraîchage", "grandes cultures"],
+    synonyms: ["production vegetale", "production végétale", "sol", "fertilisation", "irrigation", "phytosanitaire"],
     weak_keywords: ["conseil", "agroecologie", "agroécologie"],
     context_keywords: [],
     banned_keywords: ["elevage", "élevage", "viticulture", "vigne", "vin", "foret", "forêt"],
@@ -527,7 +426,7 @@ function computeMatchScore(
   intitule: string,
   etablissement: string,
   config: JobProfile,
-  phase: Phase
+  phase: Phase,
 ): { score: number; reasons: string[] } {
   const text = `${intitule} ${etablissement}`;
   const reasons: string[] = [];
@@ -538,13 +437,11 @@ function computeMatchScore(
   // Banned check
   for (const banned of config.banned_keywords) {
     if (includesWord(text, banned)) {
-      if (DEBUG) console.log(`[BANNED] keyword: ${banned}`);
       return { score: 0, reasons: ["Contenu non pertinent"] };
     }
   }
   for (const phrase of config.banned_phrases) {
     if (includesPhrase(text, phrase)) {
-      if (DEBUG) console.log(`[BANNED] phrase: ${phrase}`);
       return { score: 0, reasons: ["Contenu non pertinent"] };
     }
   }
@@ -557,9 +454,7 @@ function computeMatchScore(
       score += 8;
     }
   }
-  if (strongMatches > 0) {
-    reasons.push(`Correspond au métier recherché (${strongMatches} critères)`);
-  }
+  if (strongMatches > 0) reasons.push(`Correspond au métier recherché (${strongMatches} critères)`);
 
   // Synonyms
   let synonymMatches = 0;
@@ -569,36 +464,25 @@ function computeMatchScore(
       score += 5;
     }
   }
-  if (synonymMatches > 0) {
-    reasons.push(`Domaine proche (${synonymMatches} éléments)`);
-  }
+  if (synonymMatches > 0) reasons.push(`Domaine proche (${synonymMatches} éléments)`);
 
   // Context keywords
   if (config.context_keywords && config.context_keywords.length > 0) {
     for (const ctx of config.context_keywords) {
-      if (includesWord(text, ctx)) {
-        score += 3;
-      }
+      if (includesWord(text, ctx)) score += 3;
     }
   }
 
   // Weak keywords (phase relaxed)
   if (phase !== "strict") {
     for (const weak of config.weak_keywords) {
-      if (includesWord(text, weak)) {
-        score += 2;
-      }
+      if (includesWord(text, weak)) score += 2;
     }
   }
 
-  if (score < minScore) {
-    return { score: 0, reasons: [] };
-  }
+  if (score < minScore) return { score: 0, reasons: [] };
 
-  return {
-    score: Math.min(score, 100),
-    reasons: reasons.slice(0, MAX_WHY_REASONS),
-  };
+  return { score: Math.min(score, 100), reasons: reasons.slice(0, MAX_WHY_REASONS) };
 }
 
 function applyDistanceBonus(baseScore: number, distanceKm: number, config: JobProfile): number {
@@ -610,7 +494,7 @@ function applyDistanceBonus(baseScore: number, distanceKm: number, config: JobPr
 }
 
 // ==================================================================================
-// LBA FETCH
+// LBA FETCH (robuste: results | formations | data.results)
 // ==================================================================================
 async function fetchLBA(params: {
   romes: string[];
@@ -622,9 +506,13 @@ async function fetchLBA(params: {
   const { romes, latitude, longitude, radius, caller } = params;
 
   const romesParam = romes.join(",");
-  const url = `https://labonnealternance-recette.apprentissage.beta.gouv.fr/api/v1/formations?romes=${romesParam}&latitude=${latitude}&longitude=${longitude}&radius=${radius}&caller=${caller ?? "ocapiat"}`;
-
-  if (DEBUG) console.log(`[LBA] Fetching: ${url}`);
+  const url =
+    `https://labonnealternance-recette.apprentissage.beta.gouv.fr/api/v1/formations` +
+    `?romes=${encodeURIComponent(romesParam)}` +
+    `&latitude=${encodeURIComponent(String(latitude))}` +
+    `&longitude=${encodeURIComponent(String(longitude))}` +
+    `&radius=${encodeURIComponent(String(radius))}` +
+    `&caller=${encodeURIComponent(caller ?? "ocapiat")}`;
 
   try {
     const controller = new AbortController();
@@ -639,18 +527,25 @@ async function fetchLBA(params: {
     clearTimeout(timeoutId);
 
     if (!res.ok) {
-      console.error(`[LBA] HTTP ${res.status}`);
+      const txt = await res.text().catch(() => "");
+      console.error(`[LBA] HTTP ${res.status} - ${txt.slice(0, 300)}`);
       return [];
     }
 
-    const data = await res.json();
-    const results = data?.results ?? [];
+    const data = await res.json().catch(() => null);
+
+    // ✅ robust parsing (API variants)
+    const results =
+      (data && Array.isArray(data.results) && data.results) ||
+      (data && Array.isArray(data.formations) && data.formations) ||
+      (data && Array.isArray(data.data?.results) && data.data.results) ||
+      [];
 
     if (DEBUG) console.log(`[LBA] Received ${results.length} results`);
 
     return Array.isArray(results) ? results : [];
   } catch (err: any) {
-    console.error("[LBA] Fetch error:", err.message);
+    console.error("[LBA] Fetch error:", err?.message ?? String(err));
     return [];
   }
 }
@@ -669,7 +564,7 @@ Deno.serve(async (req: Request) => {
     if (!metier || !ville || typeof lat !== "number" || typeof lon !== "number") {
       return new Response(
         JSON.stringify({ error: "Paramètres manquants: metier, ville, lat, lon requis" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
@@ -677,7 +572,7 @@ Deno.serve(async (req: Request) => {
     if (!config) {
       return new Response(
         JSON.stringify({ error: `Métier inconnu: ${metier}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
@@ -686,12 +581,8 @@ Deno.serve(async (req: Request) => {
 
     const globalMaxResults = config.max_results ?? GLOBAL_MAX_RESULTS_DEFAULT;
 
-    if (DEBUG) {
-      console.log(`[SEARCH] Métier: ${config.label}`);
-      console.log(`[SEARCH] Ville: ${ville} (${lat}, ${lon})`);
-      console.log(`[SEARCH] Mode: ${searchMode}`);
-      console.log(`[SEARCH] Niveau: ${niveauFiltre}`);
-    }
+    // Pour affichage UI
+    let appliedRadiusKm = config.radius_km;
 
     // ===== PHASE 1: RefEA (source officielle) =====
     let refeaResults: any[] = [];
@@ -705,8 +596,6 @@ Deno.serve(async (req: Request) => {
         radiusKm: refeaRadius,
         limit: REFEA_MAX,
       });
-
-      if (DEBUG) console.log(`[RefEA] Found ${refeaResults.length} formations`);
     } catch (e) {
       console.error("[RefEA] Error:", e);
     }
@@ -714,14 +603,29 @@ Deno.serve(async (req: Request) => {
     // ===== PHASE 2: LBA (API externe) =====
     let allFormations: any[] = [];
     const phases: Phase[] = [];
-
     if (searchMode.includes("strict")) phases.push("strict");
     if (searchMode.includes("relaxed")) phases.push("relaxed");
     if (searchMode.includes("fallback_rome")) phases.push("fallback");
 
+    // Warnings / debug utiles
+    const warnings: any = {};
+    const debug: any = {
+      phases,
+      lba_requests: [] as any[],
+      sources: {
+        refea: refeaResults.length,
+        lba: 0,
+        perplexity: 0,
+      },
+    };
+
     for (const phase of phases) {
       const romes = phase === "fallback" ? (config.fallback_romes ?? config.romes) : config.romes;
       const currentRadius = phase === "strict" ? config.radius_km : config.radius_km + config.max_extra_radius_km;
+
+      appliedRadiusKm = Math.max(appliedRadiusKm, currentRadius);
+
+      debug.lba_requests.push({ phase, romes, radius: currentRadius });
 
       const lbaRaw = await fetchLBA({
         romes,
@@ -734,12 +638,14 @@ Deno.serve(async (req: Request) => {
       for (const item of lbaRaw) {
         const intitule = item?.title || item?.intitule || "";
         const organisme = item?.company?.name || item?.organisme || "";
+
         const itemLat = item?.place?.latitude ?? item?.lat;
         const itemLon = item?.place?.longitude ?? item?.lon;
 
-        if (!itemLat || !itemLon) continue;
+        if (typeof itemLat !== "number" || typeof itemLon !== "number") continue;
 
         const distance = haversineKm(lat, lon, itemLat, itemLon);
+
         const hardCap = config.hard_distance_cap_km ?? 500;
         if (distance > hardCap) continue;
 
@@ -785,8 +691,7 @@ Deno.serve(async (req: Request) => {
     });
 
     allFormations = allFormations.slice(0, LBA_MAX);
-
-    if (DEBUG) console.log(`[LBA] Total after filtering: ${allFormations.length}`);
+    debug.sources.lba = allFormations.length;
 
     // ===== PHASE 3: Perplexity (enrichissement si nécessaire) =====
     let perplexityResults: any[] = [];
@@ -810,8 +715,7 @@ Deno.serve(async (req: Request) => {
         };
 
         perplexityResults = await fetchPerplexityFormations(pplxInput);
-
-        if (DEBUG) console.log(`[Perplexity] Enriched with ${perplexityResults.length} formations`);
+        debug.sources.perplexity = perplexityResults.length;
       } catch (e) {
         console.error("[Perplexity] Error:", e);
       }
@@ -821,7 +725,7 @@ Deno.serve(async (req: Request) => {
     let finalResults = mergeFormationsWithoutDuplicates(refeaResults, allFormations);
     finalResults = mergeFormationsWithoutDuplicates(finalResults, perplexityResults);
 
-    // Final sort: RefEA (score 80) first, then by score desc, then distance asc
+    // Final sort by score desc, then distance asc
     finalResults.sort((a, b) => {
       const scoreA = a?.match?.score ?? 0;
       const scoreB = b?.match?.score ?? 0;
@@ -832,11 +736,31 @@ Deno.serve(async (req: Request) => {
     // Apply global max results cap
     finalResults = finalResults.slice(0, globalMaxResults);
 
-    if (DEBUG) console.log(`[FINAL] Returning ${finalResults.length} formations`);
+    // Warning si très peu / ou résultats éloignés
+    if (finalResults.length > 0) {
+      const avgDist =
+        finalResults.reduce((sum, x) => sum + (typeof x.distance_km === "number" ? x.distance_km : 0), 0) /
+        finalResults.length;
+      if (avgDist > (config.soft_distance_cap_km ?? 200)) warnings.far_results = true;
+    }
 
+    // ✅ RÉPONSE AU FORMAT ATTENDU PAR TON FRONT
     return new Response(
       JSON.stringify({
+        // champs attendus par SearchFormationsResponse
+        metier_detecte: config.label,
+        ville_reference: ville,
+        rayon_applique: `${appliedRadiusKm} km`,
+        mode: searchMode,
+        count: finalResults.length,
+        count_total: finalResults.length,
+
         formations: finalResults,
+
+        warnings,
+        debug,
+
+        // meta (bonus, pas obligatoire)
         meta: {
           total: finalResults.length,
           sources: {
@@ -852,19 +776,13 @@ Deno.serve(async (req: Request) => {
           },
         },
       }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (error: any) {
     console.error("[ERROR]", error);
-    return new Response(
-      JSON.stringify({ error: "Erreur serveur", details: error.message }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
-    );
+    return new Response(JSON.stringify({ error: "Erreur serveur", details: error.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
