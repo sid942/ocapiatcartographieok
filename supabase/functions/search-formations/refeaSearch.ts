@@ -11,14 +11,39 @@ import { REFEA_RULES } from "./refeaRules.ts";
 
 /**
  * RefEA Search (offline dataset)
- * Version VALIDÉE EXPERT OCAPIAT
+ * Version VALIDÉE EXPERT OCAPIAT + FIX ENCODAGE
  */
 
-type RefeaRule = {
-  mustAny: string[];
-  mustAll?: string[];
-  forbidAny: string[];
-};
+// ----------------------------------------------------------------------
+// 1. UTILITAIRES (Encodage & Normalisation)
+// ----------------------------------------------------------------------
+
+/**
+ * Répare les chaines mal encodées (Windows-1252 lu comme UTF-8).
+ * Transforme "LycÃ©e" en "Lycée".
+ */
+function fixEncoding(str: string | null | undefined): string {
+  if (!str) return "";
+  try {
+    const bytes = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) {
+      bytes[i] = str.charCodeAt(i);
+    }
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch (e) {
+    return str;
+  }
+}
+
+/**
+ * Formate une ville : "SAINT ETIENNE" -> "Saint Etienne"
+ */
+function formatCity(str: string | null | undefined): string {
+  const fixed = fixEncoding(str);
+  if (!fixed) return "";
+  // Met en minuscules puis met la première lettre de chaque mot en majuscule
+  return fixed.toLowerCase().replace(/(^\w|\s\w)/g, (m) => m.toUpperCase());
+}
 
 function norm(s: any): string {
   return (s ?? "")
@@ -31,6 +56,16 @@ function norm(s: any): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+// ----------------------------------------------------------------------
+// 2. LOGIQUE MÉTIER (Règles & Clés)
+// ----------------------------------------------------------------------
+
+type RefeaRule = {
+  mustAny: string[];
+  mustAll?: string[];
+  forbidAny: string[];
+};
 
 function ruleKey(jobLabel: string): string {
   const k = norm(jobLabel);
@@ -64,15 +99,17 @@ function getRules(jobLabel: string): RefeaRule | null {
 
 function matchRules(title: string, jobLabel: string): boolean {
   const rules = getRules(jobLabel);
-  if (!rules) return false; // Sécurité maximale : pas de règle = pas de résultat
+  if (!rules) return false; // Pas de règle = Pas de résultat (Sécurité)
 
   const t = norm(title);
 
+  // 1. Interdiction stricte (Le Filtre)
   for (const w of rules.forbidAny ?? []) {
     const ww = norm(w);
     if (ww && t.includes(ww)) return false;
   }
 
+  // 2. Obligation de TOUS les mots (Rare)
   if (Array.isArray(rules.mustAll) && rules.mustAll.length > 0) {
     for (const w of rules.mustAll) {
       const ww = norm(w);
@@ -80,6 +117,7 @@ function matchRules(title: string, jobLabel: string): boolean {
     }
   }
 
+  // 3. Obligation d'AU MOINS un mot (Le Carburant)
   if (Array.isArray(rules.mustAny) && rules.mustAny.length > 0) {
     let ok = false;
     for (const w of rules.mustAny) {
@@ -107,6 +145,10 @@ function makeStableId(r: RefEARow): string {
   return `refea_${norm((r as any).formacertif_libusage)}_${norm((r as any).adresse_ville)}_${(r as any).latitude ?? ""}`;
 }
 
+// ----------------------------------------------------------------------
+// 3. FONCTION PRINCIPALE
+// ----------------------------------------------------------------------
+
 export function searchRefEA(params: {
   jobLabel: string;
   ville: string;
@@ -128,13 +170,14 @@ export function searchRefEA(params: {
 
       const dist = haversineKm(userLat, userLon, lat, lon);
       
-      // Optimisation : on pré-filtre la distance ici pour éviter de trier des milliers de résultats inutiles
+      // Optimisation : filtre distance immédiat
       if (dist > radiusKm) return null;
 
       return {
         raw: r,
         dist,
-        city: norm(refeaCityOf(r)),
+        // On garde la ville brute ici pour le tri éventuel, mais on l'affichera propre plus tard
+        city: norm(refeaCityOf(r)), 
         title: refeaTitleOf(r) || (r as any).formacertif_libusage || "",
         lat,
         lon,
@@ -149,30 +192,32 @@ export function searchRefEA(params: {
     lon: number;
   }>;
 
-  // 🛑 J'AI SUPPRIMÉ LE FILTRE "MÊME VILLE" ICI.
-  // On prend tout ce qui est dans le rayon, point barre.
-
-  // Rayon + tri distance + limite
+  // Tri par distance (Le plus proche d'abord)
   const picked = scored
     .sort((a, b) => a.dist - b.dist)
     .slice(0, limit);
 
-  // Output normalisé
+  // Output normalisé avec nettoyage des typos
   return picked.map((x) => {
     const r = x.raw as any;
 
+    // 🧹 NETTOYAGE DES DONNÉES ICI 🧹
+    const titrePropre = fixEncoding(r.formacertif_libusage || x.title);
+    const organismePropre = fixEncoding(r.uai_libcom || r.uai_libadmin || r.etablissement_niveau_1 || "Établissement");
+    const villePropre = formatCity(r.adresse_ville);
+
     return {
       id: makeStableId(x.raw),
-      intitule: r.formacertif_libusage || x.title || "Formation",
-      organisme: r.uai_libcom || r.uai_libadmin || r.etablissement_niveau_1 || "Établissement",
-      ville: r.adresse_ville || "",
+      intitule: titrePropre || "Formation",
+      organisme: organismePropre,
+      ville: villePropre,
       lat: x.lat,
       lon: x.lon,
       distance_km: Math.round(x.dist * 10) / 10,
       rncp: "Non renseigné",
       modalite: "Non renseigné",
       alternance: "Non renseigné",
-      categorie: "Diplôme / Titre (Source officielle RefEA)", // Je préfère préciser la source
+      categorie: "Diplôme / Titre (Source officielle RefEA)",
       site_web: r.site_internet || null,
       url: r.site_internet || null,
       niveau: "N/A",
