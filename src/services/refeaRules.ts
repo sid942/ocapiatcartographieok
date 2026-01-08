@@ -6,7 +6,7 @@ type Rules = {
 };
 
 export const REFEA_RULES: Record<string, Rules> = {
-  "technico-commercial": {
+  "technico commercial": {
     mustAny: ["commerce", "commercial", "vente", "negociation", "technico", "distribution", "agrofourniture"],
     forbidAny: ["paysagiste", "equitation", "aquaculture", "amenagements paysagers", "foret"],
   },
@@ -16,12 +16,12 @@ export const REFEA_RULES: Record<string, Rules> = {
     forbidAny: ["eau", "assainissement", "hydraulique", "equitation", "paysagiste", "foret"],
   },
 
-  "chauffeur": {
+  "chauffeur agricole": {
     mustAny: ["agroequipement", "machinisme", "machines agricoles", "pilotage", "tracteur", "recolte", "travaux mecanises"],
     forbidAny: ["equitation", "equin", "paysagiste", "foret", "bûcheronnage", "debardage", "transport de personnes"],
   },
 
-  "responsable silo": {
+  "responsable de silo": {
     mustAny: ["cereales", "grain", "collecte", "stockage", "qualite", "logistique", "silo"],
     forbidAny: ["eau", "assainissement", "hydraulique", "equitation", "paysagiste", "foret"],
   },
@@ -31,7 +31,7 @@ export const REFEA_RULES: Record<string, Rules> = {
     forbidAny: ["equitation", "paysagiste", "foret"],
   },
 
-  "magasinier/cariste": {
+  "magasinier cariste": {
     mustAny: ["cariste", "caces", "entrepot", "magasinier", "logistique", "stock", "preparation de commandes"],
     forbidAny: ["equitation", "paysagiste", "foret"],
   },
@@ -41,12 +41,12 @@ export const REFEA_RULES: Record<string, Rules> = {
     forbidAny: ["paysagiste", "equitation", "amenagements paysagers", "foret"],
   },
 
-  "contrôleur qualité": {
+  "controleur qualite": {
     mustAny: ["qualite", "haccp", "controle", "laboratoire", "agroalimentaire", "tracabilite", "analyse"],
     forbidAny: ["equitation", "paysagiste", "foret"],
   },
 
-  "agréeur": {
+  "agreeur": {
     mustAny: ["fruits", "legumes", "produits frais", "qualite", "reception", "tri", "calibrage"],
     forbidAny: ["equitation", "paysagiste", "foret", "eau"],
   },

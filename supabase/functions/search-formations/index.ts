@@ -1301,6 +1301,19 @@ Deno.serve(async (req: Request) => {
     const userLon = geo.userLon;
     const villeRef = geo.villeRef;
 
+    // ✅ 0) REFEA D'ABORD
+    const refeaResults = searchRefEA({
+      jobLabel: config.label,
+      ville: villeRef,
+      userLat,
+      userLon,
+      radiusKm: 250,
+      limit: 20,
+    });
+
+    // mapped = liste de résultats qu'on va renvoyer (on commence par RefEA)
+    let mapped = refeaResults;
+
     const target = Math.max(6, config.target_min_results);
     const cap = config.max_results ?? 60;
 
@@ -1353,7 +1366,7 @@ Deno.serve(async (req: Request) => {
 
     const niveauFiltre = normalizeNiveauFilter(niveau);
 
-    const mapped = merged.map((s) => {
+    const mappedLBA = merged.map((s) => {
       const computedNiveau = inferNiveau(s.diplomaLevel, s.title);
       const distRounded = s.distanceKm === null ? 999 : round1(s.distanceKm);
 
@@ -1375,6 +1388,9 @@ Deno.serve(async (req: Request) => {
         match: { score: s.score, reasons: s.reasons },
       };
     });
+
+    // Merge RefEA + LBA (RefEA en premier car déjà dans mapped)
+    mapped = mergeFormationsWithoutDuplicates(mapped, mappedLBA);
 
     // ==================================================================================
     // PERPLEXITY ENRICHMENT (complément invisible)
