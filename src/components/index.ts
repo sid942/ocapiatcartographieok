@@ -1,4 +1,5 @@
 // supabase/functions/search-formations/index.ts
+import { geocodeCityToLatLon } from "./services/nominatim";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 import {
