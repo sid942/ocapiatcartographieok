@@ -388,7 +388,6 @@ export const REFEA_RULES: Record<string, Rules> = {
   chauffeur: {
     mustAny: M([
       "chauffeur",
-      "conduite",
       "tracteur",
       "machinisme",
       "agroequipement",
