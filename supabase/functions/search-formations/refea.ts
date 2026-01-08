@@ -1,6 +1,6 @@
 // supabase/functions/search-formations/refea.ts
-import { join } from "https://deno.land/std@0.168.0/path/mod.ts";
 
+// Interface qui correspond à tes colonnes JSON et aux besoins du moteur
 export interface RefEARow {
   formacertif_libusage?: string; // Titre
   uai_libcom?: string; // Nom école (1)
@@ -12,37 +12,58 @@ export interface RefEARow {
   site_internet?: string;
   code_formation_maaf?: string;
   code_formation_en?: string;
-  // Ajoute d'autres champs si ton CSV en a
+  // Ajouts pour compatibilité future si ton JSON évolue
+  romes?: string[];
+  diplomaLevel?: string;
 }
 
 let cachedData: RefEARow[] | null = null;
 
 /**
- * Charge les données RefEA depuis le fichier JSON local.
- * Assure-toi que le fichier s'appelle bien "refea.json" et est dans le même dossier !
+ * Charge les données depuis "refea.json"
+ * UTILISATION DE `import.meta.url` pour garantir le chemin correct sur Supabase.
  */
 export function loadRefEA(): RefEARow[] {
-  if (cachedData) return cachedData;
+  // Si on a déjà chargé les données une fois, on les renvoie direct (cache mémoire)
+  if (cachedData) {
+    return cachedData;
+  }
 
   try {
-    // On essaie de lire le fichier refea.json à la racine de la fonction
-    // Note: Si tu utilises un CSV, le code doit être adapté pour parser du CSV.
-    // Ici, je suppose que tu as converti ton CSV en JSON comme vu précédemment.
-    const text = Deno.readTextFileSync(join(Deno.cwd(), "refea.json"));
+    console.log("[RefEA] 📂 Tentative de chargement du fichier refea.json...");
+    
+    // C'est ICI que la magie opère : on cible le fichier par rapport au script actuel
+    const fileUrl = new URL('./refea.json', import.meta.url);
+    
+    // Lecture du fichier
+    const text = Deno.readTextFileSync(fileUrl);
+    
+    if (!text || text.length === 0) {
+      console.error("[RefEA] ❌ ERREUR : Le fichier refea.json est vide !");
+      return [];
+    }
+
+    // Parsing JSON
     const data = JSON.parse(text);
     
-    // Sécurité : on s'assure que c'est un tableau
-    cachedData = Array.isArray(data) ? data : [];
-    console.log(`[RefEA] Chargé ${cachedData?.length} lignes.`);
-    return cachedData || [];
+    if (Array.isArray(data)) {
+      cachedData = data;
+      console.log(`[RefEA] ✅ SUCCÈS : ${cachedData.length} formations chargées en mémoire.`);
+      return cachedData;
+    } else {
+      console.error("[RefEA] ❌ ERREUR : Le fichier refea.json n'est pas un tableau JSON valide.");
+      return [];
+    }
+
   } catch (e) {
-    console.error("[RefEA] Erreur chargement refea.json :", e);
+    console.error("[RefEA] 💥 CRITICAL ERROR : Impossible de lire refea.json.", e);
+    // On retourne un tableau vide pour ne pas faire crasher toute l'appli
     return [];
   }
 }
 
 /**
- * Convertit une valeur en nombre ou null
+ * Convertit une valeur en nombre ou null (Sécurité parsing)
  */
 export function toNumberOrNull(val: any): number | null {
   if (val === undefined || val === null || val === "") return null;
@@ -52,7 +73,7 @@ export function toNumberOrNull(val: any): number | null {
 
 /**
  * Calcul de distance GPS (Haversine)
- * (Déplacé ici pour être partagé)
+ * Indispensable pour le tri par distance
  */
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371; // Rayon Terre km
@@ -68,12 +89,15 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
 }
 
 /**
- * Helpers pour extraire ville / titre proprement
+ * Helper : Récupérer la ville proprement
  */
 export function refeaCityOf(r: RefEARow): string {
   return r.adresse_ville ?? "";
 }
 
+/**
+ * Helper : Récupérer le titre proprement
+ */
 export function refeaTitleOf(r: RefEARow): string {
   return r.formacertif_libusage ?? "";
 }
