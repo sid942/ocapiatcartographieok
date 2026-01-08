@@ -124,7 +124,6 @@ function App() {
 
       const { data, error: functionError } = await supabase.functions.invoke("search-formations", {
         body: payload,
-        // @ts-expect-error supabase-js ne typpe pas signal ici mais ça passe en runtime fetch
         signal: controller.signal,
       });
 
