@@ -1,167 +1,190 @@
 // supabase/functions/search-formations/refeaRules.ts
 
 /**
- * RefEA RULES (Filtrage métier sur dataset RefEA)
- * Objectif: ZÉRO hors-sujet.
+ * RefEA Rules (filtrage OFFLINE)
+ * Objectif : ZÉRO hors-sujet.
  *
- * IMPORTANT:
- * - Ce fichier est consommé par refeaSearch.ts via REFEA_RULES[jobLabel] ou REFEA_RULES[jobKey]
- * - On fournit donc:
- *   1) des règles par jobKey stable (technico, silo, etc.)
- *   2) des alias par label (ex: "Technico-commercial") pour compat index.ts actuel
+ * Stratégie :
+ * - Un socle global "NO_SCHOOL" interdit tout ce qui est collège/4e/3e/cycle orientation/seconde, etc.
+ * - Un socle global "NO_OFFTOPIC" interdit les gros hors-domaines récurrents (équitation, paysage, forêt…)
+ * - Chaque métier ajoute ses mustAny (signaux positifs) + ses forbidAny spécifiques (eau/GEMEAU etc)
+ *
+ * NOTE : Le moteur RefEA applique :
+ * - forbidAny => rejet immédiat
+ * - mustAll (optionnel) => tous obligatoires
+ * - mustAny => au moins 1 obligatoire
  */
 
-export type RefeaRule = {
-  /** au moins UN des mots/expressions doit matcher */
+export type Rules = {
   mustAny: string[];
-  /** TOUS les mots/expressions doivent matcher (optionnel) */
   mustAll?: string[];
-  /** si UN mot/expression match => rejet immédiat */
   forbidAny: string[];
 };
 
-/**
- * Interdictions globales (anti "collège / cycle orientation / 4e / 3e")
- * -> on le met aussi ici car RefEA est souvent la source de ces résultats.
- */
-const GLOBAL_FORBID: string[] = [
+/** Interdits globaux : tout ce qui est niveau collège / orientation / classes */
+const NO_SCHOOL: string[] = [
   "cycle orientation",
-  "cycle d orientation",
-  "classe de 4eme",
-  "classe de 3eme",
-  "4eme",
-  "3eme",
   "college",
   "collège",
-  "enseignement agricole cycle",
-  "cycle de l enseignement agricole",
-  "4eme de l enseignement agricole",
-  "3eme de l enseignement agricole",
-  "cycle d insertion",
+  "classe de 4",
+  "classe de 3",
+  "4eme",
+  "4ème",
+  "3eme",
+  "3ème",
+  "seconde",
+  "2nde",
+  "troisieme",
+  "troisième",
+  "quatrieme",
+  "quatrième",
+  "college agricole",
+  "enseignement agricole (4",
+  "enseignement agricole (3",
+  "cycle d orientation",
+  "cycle d'orientation",
+  "orientation",
   "prepa apprentissage",
-  "prepa metiers",
-  "4e",
-  "3e",
+  "prépa apprentissage",
+  "dispositif d orientation",
+  "dispositif d'orientation",
+  "classe de découverte",
+  "classe d orientation",
+  "classe d'orientation",
+];
+
+/** Interdits globaux : gros hors-domaines récurrents */
+const NO_OFFTOPIC_COMMON: string[] = [
+  // équitation / animaux de compagnie
+  "equitation",
+  "équitation",
+  "equestre",
+  "équestre",
+  "cheval",
+  "chevaux",
+  "palefrenier",
+  "soigneur",
+  "animalerie",
+  "animaux de compagnie",
+  "canin",
+  "felin",
+  "félin",
+
+  // paysage / espaces verts / fleuriste
+  "paysagiste",
+  "amenagement paysager",
+  "aménagement paysager",
+  "amenagements paysagers",
+  "aménagements paysagers",
+  "espaces verts",
+  "horticulture ornementale",
+  "fleuriste",
+  "art floral",
+  "jardinerie",
+  "jardins",
+
+  // forêt / bûcheronnage
+  "foret",
+  "forêt",
+  "sylviculture",
+  "bucheronnage",
+  "bûcheronnage",
+  "debardage",
+  "débardage",
+  "elagage",
+  "élagage",
+  "abattage",
+  "tronconneuse",
+  "tronçonneuse",
+
+  // tourisme / services aux personnes
+  "tourisme",
+  "loisirs",
+  "service a la personne",
+  "services a la personne",
+  "sap",
+  "aide a la personne",
+  "aide à la personne",
+];
+
+/** Domaine eau / environnement "GEMEAU" : à bannir FORT pour silo/responsable silo */
+const NO_WATER_GEMEAU: string[] = [
+  "eau",
+  "assainissement",
+  "hydraulique",
+  "gemeau",
+  "gém eau",
+  "gestion de l eau",
+  "gestion de l'eau",
+  "milieux aquatiques",
+  "riviere",
+  "rivière",
+  "hydrobiologie",
+  "stations d epuration",
+  "stations d'épuration",
+  "epuration",
+  "épuration",
+  "reseaux d eau",
+  "réseaux d'eau",
+];
+
+/** Quelques mots qui indiquent "élevage pur" quand on ne veut pas (silo/culture/ligne) */
+const NO_LIVESTOCK: string[] = [
+  "elevage",
+  "élevage",
+  "bovin",
+  "porcin",
+  "ovin",
+  "caprin",
+  "avicole",
+  "volaille",
+  "equin",
+  "équins",
+];
+
+/** Viticulture / vin (souvent hors sujet pour plusieurs métiers) */
+const NO_WINE: string[] = [
+  "viticulture",
+  "vigne",
+  "oenologie",
+  "œnologie",
+  "vin",
+  "vins",
+  "spiritueux",
+  "bieres",
+  "bières",
 ];
 
 /**
- * Helpers: petites listes réutilisées
+ * Helper : construit un forbidAny robuste sans doublons.
  */
-const WORDS_LOGISTIQUE = ["logistique", "supply chain", "entrepot", "entrepôt", "stocks", "flux", "wms", "expedition", "expédition", "reception", "réception"];
-const WORDS_QUALITE = ["qualite", "qualité", "controle", "contrôle", "haccp", "tracabilite", "traçabilité", "laboratoire", "audit", "analyse", "plan de controle", "plan de contrôle"];
-const WORDS_AGRO = ["agricole", "agriculture", "agroalimentaire", "alimentaire", "cereales", "céréales", "grain", "grains"];
+function F(...lists: string[][]): string[] {
+  return Array.from(new Set(lists.flat().filter(Boolean)));
+}
 
 /**
- * RÈGLES PRINCIPALES (par jobKey)
- *
- * Notes:
- * - mustAny doit être assez spécifique pour éviter le bruit.
- * - forbidAny doit virer le bruit fréquent / hors-domaine.
- * - GLOBAL_FORBID est injecté dans chaque règle.
+ * Helper : mustAny sans doublons.
  */
-const RULES_BY_KEY: Record<string, RefeaRule> = {
-  // ---------------------------
-  // SILO
-  // ---------------------------
-  silo: {
-    mustAny: ["silo", "stockage", "collecte", "cereales", "céréales", "grain", "grains", "sechage", "séchage", "tri", "reception", "réception", "expedition", "expédition", "elevateur", "élévateur"],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      // anti-hors sujet
-      "silo ciment",
-      "ciment",
-      "beton",
-      "béton",
-      "btp",
-      "batiment",
-      "bâtiment",
-      "assainissement",
-      "hydraulique",
-    ],
-  },
+function M(list: string[]): string[] {
+  return Array.from(new Set(list.filter(Boolean)));
+}
 
-  responsable_silo: {
-    mustAny: ["chef de silo", "responsable silo", "gestion des stocks", "stocks", "stockage", "collecte", "cereales", "céréales", "qualite", "qualité", "reception", "réception", "expedition", "expédition", "management", "encadrement"],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      "silo ciment",
-      "ciment",
-      "beton",
-      "béton",
-      "btp",
-      "assainissement",
-      "hydraulique",
-    ],
-  },
-
-  // ---------------------------
-  // CHAUFFEUR AGRICOLE (engins agricoles)
-  // ---------------------------
-  chauffeur: {
-    mustAny: [
-      "tracteur",
-      "moissonneuse",
-      "ensileuse",
-      "pulverisateur",
-      "pulvérisateur",
-      "remorque",
-      "benne",
-      "travaux agricoles",
-      "conduite de machines agricoles",
-      "conducteur de machines agricoles",
-      "pilotage de machines agricoles",
-      "agro equipement",
-      "agroéquipement",
-      "agroequipement",
-      "machinisme",
-      "cima",
-      "cgea",
-    ],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      // anti transport de personnes / routier
-      "chauffeur de bus",
-      "transport de personnes",
-      "vtc",
-      "taxi",
-      "voyageurs",
-      "conducteur routier",
-      "poids lourd",
-      "spl",
-      "fimo",
-      "fco",
-      "messagerie",
-      // anti hors-sujet agricole
-      "equitation",
-      "équit",
-      "cheval",
-      "attelage",
-      "paysage",
-      "paysagiste",
-      "horticulture",
-      "viticulture",
-      "oenologie",
-      "œnologie",
-    ],
-  },
-
-  // ---------------------------
-  // TECHNICO-COMMERCIAL (agri/agro)
-  // IMPORTANT: évite les formations purement techniques (ex: génie équipements agricoles)
-  // ---------------------------
+export const REFEA_RULES: Record<string, Rules> = {
+  /**
+   * TECHNICO (technico-commercial)
+   * On veut éviter le commerce “générique” non-agri.
+   * => on oblige des signaux agro/tech + on bannit marketing/digital trop génériques.
+   */
   technico: {
-    mustAny: [
-      // signaux commerciaux
-      "technico commercial",
-      "technico-commercial",
-      "negociation",
-      "négociation",
-      "vente",
-      "commercial",
-      "business",
-      "relation client",
-      "prospection",
-      // spécialités agricoles fréquentes
+    mustAny: M([
+      // technico-commercial "vrai"
+      "technico",
+      "negociateur technico",
+      "négociateur technico",
+      "conseil et commercialisation",
+      "solutions techniques",
+      "conseil vente",
+      // signaux agri / filière
       "agrofourniture",
       "intrants",
       "semences",
@@ -170,169 +193,468 @@ const RULES_BY_KEY: Record<string, RefeaRule> = {
       "nutrition animale",
       "cooperative",
       "coopérative",
-      "negoce",
-      "négoce",
-      // intitulés BTSA usuels
-      "btsa technico commercial",
-      "btsa technico-commercial",
-    ],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      // anti hors domaine
-      "immobilier",
-      "assurance",
-      "banque",
-      "cosmetique",
-      "cosmétique",
-      "mode",
-      "textile",
-      "informatique",
-      "developpeur",
-      "développeur",
-      "web",
-      // anti "tech pur" qui pollue énormément Technico
-      "genie des equipements agricoles",
-      "génie des équipements agricoles",
-      "maintenance des materiels",
-      "maintenance des matériels",
-      "hydraulique",
-      "automatismes",
-      "electromecanique",
-      "électromécanique",
-    ],
+      "negoce agricole",
+      "négoce agricole",
+      "biens services pour l agriculture",
+      "alimentation et boissons",
+      "distribution agricole",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      // anti “commerce pur / marketing pur”
+      [
+        "marketing",
+        "acquisition",
+        "digital",
+        "e commerce",
+        "e-commerce",
+        "communication",
+        "community manager",
+        "ux",
+        "ui",
+        "growth",
+        "business developer",
+        "business development",
+        "immobilier",
+        "assurance",
+        "banque",
+      ],
+      // anti vin/boissons si tu considères que c'est hors scope OCAPIAT pour technico
+      // (si tu veux les garder, supprime NO_WINE ici)
+      [ ...NO_WINE ],
+    ),
   },
 
-  // ---------------------------
-  // COMMERCIAL EXPORT
-  // ---------------------------
+  /**
+   * COMMERCIAL EXPORT
+   * Ici le commerce "international" est OK, mais on évite tourisme/loisirs etc.
+   */
   commercial_export: {
-    mustAny: ["export", "international", "commerce international", "import export", "import-export", "douane", "incoterms", "anglais"],
-    forbidAny: [...GLOBAL_FORBID, "immobilier", "assurance", "banque"],
+    mustAny: M([
+      "export",
+      "international",
+      "commerce international",
+      "import export",
+      "import-export",
+      "douane",
+      "incoterms",
+      "anglais",
+      "negociation internationale",
+      "négociation internationale",
+      "logistique internationale",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [
+        "tourisme",
+        "loisirs",
+        "hotellerie",
+        "hôtellerie",
+        "restauration",
+        "cuisine",
+      ],
+    ),
   },
 
-  // ---------------------------
-  // LOGISTIQUE
-  // ---------------------------
-  responsable_logistique: {
-    mustAny: [...WORDS_LOGISTIQUE, "responsable logistique", "chef de quai", "pilotage des flux", "approvisionnement", "gestion des stocks"],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      "transport de personnes",
-      "chauffeur de bus",
-      "vtc",
-      "taxi",
-    ],
+  /**
+   * SILO (Agent de silo)
+   * ZÉRO eau/GEMEAU. On garde céréales/grains/stockage/collecte/transfo.
+   * On bannit aussi élevage pur (souvent hors-sujet).
+   */
+  silo: {
+    mustAny: M([
+      "silo",
+      "cereales",
+      "céréales",
+      "grain",
+      "grains",
+      "collecte",
+      "stockage",
+      "reception",
+      "réception",
+      "expedition",
+      "expédition",
+      "sechage",
+      "séchage",
+      "tri",
+      "magasinage",
+      "cooperative",
+      "coopérative",
+      "elevateur",
+      "élévateur",
+      "grandes cultures",
+      // ouverture “indus/transfo” (utile pour RefEA)
+      "industries agroalimentaires",
+      "bio industries",
+      "transformation",
+      "conduite de systemes industriels",
+      "conduite de systèmes industriels",
+      "qualite",
+      "qualité",
+      "cgea",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [ ...NO_WATER_GEMEAU ],
+      [ ...NO_LIVESTOCK ],
+      // environnement/déchets : souvent détourne vers GEMEAU/écologie
+      ["dechets", "déchets", "environnement", "biodiversite", "biodiversité", "nature", "protection"],
+    ),
   },
 
-  magasinier_cariste: {
-    mustAny: ["cariste", "caces", "chariot", "chariot elevateur", "chariot élévateur", "magasinier", "preparation de commandes", "préparation de commandes", "picking", "manutention", "quai", "entrepot", "entrepôt", "logistique"],
-    forbidAny: [...GLOBAL_FORBID, "grue", "btp", "chantier", "transport de personnes"],
-  },
-
-  // ---------------------------
-  // QUALITE
-  // ---------------------------
-  controleur_qualite: {
-    mustAny: [...WORDS_QUALITE, ...WORDS_AGRO, "controleur qualite", "contrôleur qualité", "assistant qualite", "technicien qualite"],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      // anti mesures physiques / instrumentations
-      "mesures physiques",
-      "instrumentation",
-      "electronique",
-      "électronique",
-    ],
-  },
-
-  // ---------------------------
-  // AGRÉEUR
-  // ---------------------------
-  agreeur: {
-    mustAny: ["agreeur", "agréeur", "agreage", "agréage", "fruits", "legumes", "légumes", "produits frais", "calibrage", "tri", "qualite", "qualité"],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      // éviter logistique pure
+  /**
+   * RESPONSABLE SILO
+   * Même logique que silo + management/qualité/stocks.
+   */
+  responsable_silo: {
+    mustAny: M([
+      "silo",
+      "cereales",
+      "céréales",
+      "grain",
+      "collecte",
+      "stockage",
+      "stocks",
+      "qualite",
+      "qualité",
+      "reception",
+      "réception",
+      "expedition",
+      "expédition",
+      "sechage",
+      "séchage",
+      "management",
+      "responsable",
+      "chef",
+      "approvisionnement",
       "logistique",
-      "transport",
+      "grandes cultures",
+      "cgea",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [ ...NO_WATER_GEMEAU ],
+      [ ...NO_LIVESTOCK ],
+      ["aquaculture", "pisciculture", "poisson"],
+    ),
+  },
+
+  /**
+   * CHAUFFEUR AGRICOLE
+   * On bannit transport de personnes + BTP + routier pur.
+   */
+  chauffeur: {
+    mustAny: M([
+      "chauffeur",
+      "conduite",
+      "tracteur",
+      "machinisme",
+      "agroequipement",
+      "agro equipement",
+      "machines agricoles",
+      "conduite d engins",
+      "conduite d'engins",
+      "travaux mecanises",
+      "travaux mécanisés",
+      "recolte",
+      "récolte",
+      "benne",
+      "remorque",
+      "moissonneuse",
+      "ensileuse",
+      "pulverisateur",
+      "pulvérisateur",
+      "cgea",
+      "grandes cultures",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [
+        "transport de personnes",
+        "voyageurs",
+        "taxi",
+        "vtc",
+        "bus",
+        "autocar",
+        "scolaire",
+        "ambulancier",
+        "sanitaire",
+        // BTP/TP
+        "chantier",
+        "btp",
+        "travaux publics",
+        "tp",
+        // routier pur
+        "poids lourd",
+        "spl",
+        "transport routier",
+        "routier",
+        "fimo",
+        "fco",
+      ],
+      // équins/attelages déjà couverts, mais on insiste
+      ["attelage", "attelages"],
+    ),
+  },
+
+  /**
+   * RESPONSABLE LOGISTIQUE
+   * On veut logistique entrepôt/flux, pas transport voyageurs.
+   */
+  responsable_logistique: {
+    mustAny: M([
+      "logistique",
+      "supply chain",
+      "stocks",
+      "flux",
       "entrepot",
       "entrepôt",
+      "wms",
+      "expedition",
+      "expédition",
+      "reception",
+      "réception",
+      "approvisionnement",
+      "planning",
+      "transport",
+      "exploitation",
+      "organisateur",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [
+        "transport de personnes",
+        "voyageurs",
+        "chauffeur de bus",
+        "chauffeur",
+        "taxi",
+        "vtc",
+        "ambulancier",
+      ],
+    ),
+  },
+
+  /**
+   * MAGASINIER / CARISTE
+   * On bannit la vente/jardinerie pour éviter “vendeur jardinerie”.
+   */
+  magasinier_cariste: {
+    mustAny: M([
+      "cariste",
+      "caces",
+      "chariot",
+      "chariot elevateur",
+      "chariot élévateur",
       "magasinier",
-    ],
+      "entrepot",
+      "entrepôt",
+      "logistique",
+      "stock",
+      "preparation de commandes",
+      "préparation de commandes",
+      "picking",
+      "manutention",
+      "quai",
+      "emballage",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [
+        "vente",
+        "vendeur",
+        "conseil vente",
+        "jardinerie",
+        "animalerie",
+        "boutique",
+        "commerce",
+      ],
+    ),
   },
 
-  // ---------------------------
-  // CONDUCTEUR DE LIGNE (agro)
-  // ---------------------------
-  conducteur_ligne: {
-    mustAny: ["conducteur de ligne", "conduite de ligne", "conditionnement", "production", "fabrication", "process", "reglage", "réglage", "agroalimentaire", "alimentaire"],
-    forbidAny: [...GLOBAL_FORBID, "imprimerie", "textile"],
-  },
-
-  // ---------------------------
-  // TECHNICIEN CULTURE
-  // ---------------------------
-  technicien_culture: {
-    mustAny: ["technicien culture", "technicien cultural", "agronomie", "grandes cultures", "maraichage", "maraîchage", "itineraire technique", "itinéraire technique", "fertilisation", "phytosanitaire", "production vegetale", "production végétale", "sol"],
-    forbidAny: [
-      ...GLOBAL_FORBID,
-      "amenagements paysagers",
-      "aménagements paysagers",
-      "paysage",
-      "paysagiste",
-      "foret",
-      "forêt",
-      "sylviculture",
-    ],
-  },
-
-  // ---------------------------
-  // MAINTENANCE (indus)
-  // ---------------------------
+  /**
+   * MAINTENANCE (services techniques)
+   * On bannit IT + automobile + motoculture loisir.
+   */
   maintenance: {
-    mustAny: ["maintenance", "electromecanique", "électromécanique", "mecanique", "mécanique", "automatismes", "automatisme", "depannage", "dépannage"],
-    forbidAny: [...GLOBAL_FORBID, "maintenance informatique", "reseau", "réseau", "web", "developpeur", "développeur"],
+    mustAny: M([
+      "maintenance",
+      "electromecanique",
+      "électromécanique",
+      "mecanique",
+      "mécanique",
+      "automatismes",
+      "automatisme",
+      "electrique",
+      "électrique",
+      "industrie",
+      "industrielle",
+      "depannage",
+      "dépannage",
+      "robotique",
+      "maintenance industrielle",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [
+        "informatique",
+        "systemes d information",
+        "systèmes d'information",
+        "reseaux",
+        "réseaux",
+        "telecom",
+        "télécom",
+        "developpement",
+        "développement",
+        "cyber",
+        "data",
+        "cloud",
+        "devops",
+        // automobile
+        "automobile",
+        "carrosserie",
+        "mecanique auto",
+        "mécanique auto",
+        // motoculture loisir
+        "motoculture de plaisance",
+      ],
+    ),
   },
 
-  // ---------------------------
-  // DEFAULT (si jamais)
-  // ---------------------------
-  default: {
-    mustAny: [], // en pratique refeaSearch refusera si pas de règle
-    forbidAny: [...GLOBAL_FORBID],
+  /**
+   * CONTRÔLEUR QUALITÉ (agro / alimentaire)
+   * On bannit pharma/cosméto + eau/environnement.
+   */
+  controleur_qualite: {
+    mustAny: M([
+      "qualite",
+      "qualité",
+      "controle",
+      "contrôle",
+      "haccp",
+      "tracabilite",
+      "traçabilité",
+      "laboratoire",
+      "analyse",
+      "audit",
+      "bioanalyse",
+      "securite des aliments",
+      "sécurité des aliments",
+      "agroalimentaire",
+      "alimentaire",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [ ...NO_WATER_GEMEAU ],
+      ["cosmetique", "cosmétique", "pharmaceutique", "pharmacie", "chimie"],
+      ["mesures physiques", "instrumentation", "electronique", "électronique"],
+    ),
+  },
+
+  /**
+   * AGRÉEUR (fruits/légumes)
+   * On bannit logistique pure + eau.
+   */
+  agreeur: {
+    mustAny: M([
+      "agreeur",
+      "agréeur",
+      "agreage",
+      "agréage",
+      "fruits",
+      "legumes",
+      "légumes",
+      "produits frais",
+      "qualite",
+      "qualité",
+      "reception",
+      "réception",
+      "tri",
+      "calibrage",
+      "normalisation",
+      "maturation",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [ ...NO_WATER_GEMEAU ],
+      // anti logistique pure
+      ["logistique", "transport", "entrepot", "entrepôt", "magasinier", "cariste"],
+      // anti floral/horti
+      ["horticulture", "fleuriste", "art floral"],
+    ),
+  },
+
+  /**
+   * CONDUCTEUR DE LIGNE (agro/indus)
+   * On bannit viticulture/élevage/horticulture.
+   */
+  conducteur_ligne: {
+    mustAny: M([
+      "conducteur de ligne",
+      "conduite de ligne",
+      "production",
+      "conditionnement",
+      "process",
+      "reglage",
+      "réglage",
+      "transformation",
+      "operateur",
+      "opérateur",
+      "agroalimentaire",
+      "alimentaire",
+      "industries agroalimentaires",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [ ...NO_LIVESTOCK ],
+      [ ...NO_WINE ],
+      ["horticulture", "horticole", "paysage", "paysager"],
+      // on évite de partir sur laboratoire pur
+      ["laboratoire", "bioanalyse"],
+    ),
+  },
+
+  /**
+   * TECHNICIEN CULTURE (production végétale)
+   * On bannit forêt/vin/élevage + paysage.
+   */
+  technicien_culture: {
+    mustAny: M([
+      "technicien culture",
+      "culture",
+      "agronomie",
+      "maraichage",
+      "maraîchage",
+      "grandes cultures",
+      "production vegetale",
+      "production végétale",
+      "itineraire technique",
+      "itinéraire technique",
+      "sol",
+      "fertilisation",
+      "irrigation",
+      "phyto",
+      "phytosanitaire",
+      "conseil",
+      "agroecologie",
+      "agroécologie",
+    ]),
+    forbidAny: F(
+      [ ...NO_SCHOOL ],
+      [ ...NO_OFFTOPIC_COMMON ],
+      [ ...NO_LIVESTOCK ],
+      [ ...NO_WINE ],
+      ["aquaculture", "pisciculture", "poisson"],
+    ),
   },
 };
-
-/**
- * Alias par LABEL (pour compat immédiate avec index.ts actuel)
- * -> config.label de JOB_CONFIG (index.ts) passe ici.
- */
-const LABEL_ALIASES: Record<string, string> = {
-  "Agent de Silo": "silo",
-  "Responsable de Silo": "responsable_silo",
-  "Chauffeur Agricole": "chauffeur",
-  "Technico-commercial": "technico",
-  "Commercial export": "commercial_export",
-  "Responsable logistique": "responsable_logistique",
-  "Magasinier / cariste": "magasinier_cariste",
-  "Contrôleur qualité": "controleur_qualite",
-  "Agréeur": "agreeur",
-  "Conducteur de ligne": "conducteur_ligne",
-  "Technicien culture": "technicien_culture",
-  "Responsable services techniques": "maintenance",
-};
-
-/**
- * Export final: REFEA_RULES contient:
- * - les règles par jobKey
- * - les règles dupliquées par label (alias)
- */
-export const REFEA_RULES: Record<string, RefeaRule> = (() => {
-  const out: Record<string, RefeaRule> = { ...RULES_BY_KEY };
-
-  for (const [label, key] of Object.entries(LABEL_ALIASES)) {
-    const rule = RULES_BY_KEY[key];
-    if (rule) out[label] = rule;
-  }
-
-  return out;
-})();
