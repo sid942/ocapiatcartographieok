@@ -1,8 +1,8 @@
 // supabase/functions/search-formations/refea.ts
 
-// ✅ IMPORTATION STATIQUE : Cela oblige le déploiement à inclure le fichier.
+//  IMPORTATION STATIQUE : Cela oblige le déploiement à inclure le fichier.
 // Si le fichier est introuvable ou mal nommé, le déploiement échouera (ce qu'on veut pour savoir !)
-// ✅ compatible Supabase Edge (Deno)
+//  compatible Supabase Edge (Deno)
 import refeaData from "./refea.json" assert { type: "json" };
 
 
