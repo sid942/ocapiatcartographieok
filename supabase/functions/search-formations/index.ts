@@ -689,17 +689,55 @@ function detectJobKey(inputMetier: any): string {
   const raw = (inputMetier ?? "").toString().trim();
   const cleaned = cleanText(raw);
 
-  if (METIER_KEY_ALIASES[raw]) return METIER_KEY_ALIASES[raw];
-  if (METIER_KEY_ALIASES[cleaned]) return METIER_KEY_ALIASES[cleaned];
+  // alias directs (les + importants)
+  const alias: Record<string, string> = {
+    "technico-commercial": "technico",
+    "technico commercial": "technico",
+    "technico": "technico",
+    "commercial export": "commercial_export",
+    "agent de silo": "silo",
+    "agent silo": "silo",
+    "responsable de silo": "responsable_silo",
+    "responsable silo": "responsable_silo",
+    "chauffeur agricole": "chauffeur",
+    "conducteur d engins agricoles": "chauffeur",
+    "magasinier cariste": "magasinier_cariste",
+    "magasinier / cariste": "magasinier_cariste",
+    "responsable logistique": "responsable_logistique",
+    "controleur qualite": "controleur_qualite",
+    "contrôleur qualité": "controleur_qualite",
+    "agreeur": "agreeur",
+    "agréeur": "agreeur",
+    "conducteur de ligne": "conducteur_ligne",
+    "technicien culture": "technicien_culture",
+    "responsable services techniques": "maintenance",
+  };
 
-  if ((JOB_CONFIG as any)[cleaned]) return cleaned;
+  if (alias[cleaned]) return alias[cleaned];
+
+  // heuristiques (mais propres)
+  if (cleaned.includes("responsable") && cleaned.includes("silo")) return "responsable_silo";
+  if (cleaned.includes("silo")) return "silo";
+
+  // ⚠️ IMPORTANT : NE PLUS UTILISER "conduite"
+  if (cleaned.includes("chauffeur")) return "chauffeur";
+  if (cleaned.includes("engins") && cleaned.includes("agricol")) return "chauffeur";
 
   if (cleaned.includes("commercial") && cleaned.includes("export")) return "commercial_export";
   if (cleaned.includes("export")) return "commercial_export";
+
   if (cleaned.includes("technico")) return "technico";
+  if (cleaned.includes("logistique")) return "responsable_logistique";
+  if (cleaned.includes("cariste") || cleaned.includes("magasinier")) return "magasinier_cariste";
+  if (cleaned.includes("qualite") || cleaned.includes("qualité")) return "controleur_qualite";
+  if (cleaned.includes("agr")) return "agreeur";
+  if (cleaned.includes("conducteur") && cleaned.includes("ligne")) return "conducteur_ligne";
+  if (cleaned.includes("culture") || cleaned.includes("agronomie")) return "technicien_culture";
+  if (cleaned.includes("maintenance") || (cleaned.includes("services") && cleaned.includes("tech"))) return "maintenance";
 
   return "default";
 }
+
 
 // ==================================================================================
 // GEO (api-adresse)
