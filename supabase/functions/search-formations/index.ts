@@ -266,7 +266,7 @@ const JOB_PROFILES: Record<string, JobProfile> = {
       "pulvérisateur",
     ],
     synonyms: ["recolte", "récolte", "benne", "remorque"],
-    weak_keywords: ["conduite"], // ✅ “faible” uniquement
+    weak_keywords: ["conduite"], // ✅ "faible" uniquement
     context_keywords: ["cgea", "grandes cultures"],
     banned_keywords: ["taxi", "vtc", "bus", "autocar", "voyageurs", "btp", "travaux publics", "routier", "poids lourd"],
     banned_phrases: ["transport de personnes", "transport routier"],
