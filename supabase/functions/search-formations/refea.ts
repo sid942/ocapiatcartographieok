@@ -2,7 +2,9 @@
 
 // ✅ IMPORTATION STATIQUE : Cela oblige le déploiement à inclure le fichier.
 // Si le fichier est introuvable ou mal nommé, le déploiement échouera (ce qu'on veut pour savoir !)
-import refeaData from './refea.json' with { type: "json" };
+// ✅ compatible Supabase Edge (Deno)
+import refeaData from "./refea.json" assert { type: "json" };
+
 
 export interface RefEARow {
   formacertif_libusage?: string;
