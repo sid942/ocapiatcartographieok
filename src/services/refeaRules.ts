@@ -22,8 +22,10 @@ export const REFEA_RULES: Record<string, Rules> = {
     forbidAny: ["equitation", "paysagiste", "foret", "service a la personne", "tourisme", "loisirs", "seconde pro", "4eme", "3eme"],
   },
 
-  "silo": { // Agent de silo
-    mustAny: ["cereales", "grain", "collecte", "stockage", "silo", "magasinage", "agroalimentaire", "qualite", "polyvalent", "agricole", "industries agroalimentaires", "transformation", "bio industries", "conduite de systemes industriels"],
+  "silo": {
+    // J'ajoute CGEA, grandes cultures, maintenance, équipements
+    mustAny: ["cereales", "grain", "collecte", "stockage", "silo", "magasinage", "agroalimentaire", "qualite", "polyvalent", "agricole", "industries agroalimentaires", "transformation", "bio industries", "conduite de systemes industriels", "grandes cultures", "cgea", "equipements agricoles", "maintenance des materiels"],
+    // Je garde les interdits EAU/FORET
     forbidAny: ["eau", "assainissement", "hydraulique", "gemeau", "riviere", "milieux aquatiques", "equitation", "paysagiste", "foret", "dechets", "environnement", "elevage", "soigneur", "seconde pro", "4eme", "3eme"],
   },
 
