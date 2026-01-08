@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { AlertCircle, Loader2, MapPin } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
+import { loadRefEA } from "./lib/refea";
 
 import { SearchForm } from "./components/SearchForm";
 import { FormationList } from "./components/FormationList";
@@ -75,6 +76,10 @@ function shouldShowFallbackBanner(mode?: SearchMode) {
 }
 
 function App() {
+  const rows = loadRefEA();
+  console.log("RefEA rows:", rows.length);
+  console.log("RefEA sample:", rows[0]);
+
   const mapRef = useRef<FormationMapRef>(null);
 
   const [formations, setFormations] = useState<Formation[]>([]);
