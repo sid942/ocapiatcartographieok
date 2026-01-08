@@ -1,3 +1,4 @@
+// supabase/functions/search-formations/index.ts
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 import {
@@ -14,13 +15,9 @@ import { searchRefEA } from "./refeaSearch.ts";
  * ✅ VF ULTRA ROBUSTE / ZÉRO HORS-SUJET / ZÉRO “HONTE”
  *
  * Principes :
- * - RefEA = source #1 (socle) + garde-fou (hard filter métier)
- * - LBA = source principale “grand public” (toujours filtrée)
- * - Perplexity = complément seulement si nécessaire (toujours filtrée)
- * - THEME GUARD : rejette domaines hors-thème (BTP/IT/santé/etc.) + rejets métiers (routier pur etc.)
- * - HARD FILTER METIER : rejette le “hors-métier” même si c’est agricole (paysage/vigne/etc. pour chauffeur)
- * - STRICT : si aucun signal métier → rejet
- * - Alternance/modalité/RNCP : jamais inventé => "Non renseigné"
+ * - RefEA = source #1 (socle) -> Filtrée par refeaRules.ts
+ * - LBA = source principale “grand public” -> Filtrée par HARD_RULES_BY_JOB ici
+ * - Perplexity = complément seulement si nécessaire -> Filtrée par HARD_RULES_BY_JOB ici
  */
 
 const corsHeaders = {
@@ -40,44 +37,30 @@ type Phase = "strict" | "relaxed" | "fallback";
 interface JobProfile {
   key: string;
   label: string;
-
   romes: string[];
   fallback_romes?: string[];
-
   radius_km: number;
-
   strong_keywords: string[];
   synonyms: string[];
   weak_keywords: string[];
-
   banned_keywords: string[];
   banned_phrases: string[];
-
   context_keywords?: string[];
-
   min_score: number;
   target_min_results: number;
   max_extra_radius_km: number;
-
   relaxed_min_score?: number;
   max_results?: number;
-
   soft_distance_cap_km?: number;
   hard_distance_cap_km?: number;
 }
 
 const ABSOLUTE_MIN_SCORE = 8;
 const MAX_WHY_REASONS = 3;
-
-// Perplexity = complément uniquement
 const PERPLEXITY_SCORE = 14;
 const MIN_RESULTS_BEFORE_ENRICH = 10;
 const MAX_AVG_DISTANCE_BEFORE_ENRICH = 150;
-
-// Timeout réseau
 const FETCH_TIMEOUT_MS = 10_000;
-
-// Logs debug (désactive en prod)
 const DEBUG = false;
 
 function getPerplexityHardCap(config: JobProfile) {
@@ -128,7 +111,6 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
-
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -143,84 +125,50 @@ function normalizeNiveauFilter(n: any): NiveauFiltre {
   return "all";
 }
 
+/**
+ * Détection de niveau améliorée (alignée avec RefEA)
+ */
 function inferNiveau(diplomaLevel: any, title: string): string {
   const dl = (diplomaLevel ?? "").toString().trim();
   if (dl === "3" || dl === "4" || dl === "5" || dl === "6") return dl;
 
   const t = cleanText(title);
 
-  if (includesPhrase(t, "capa") || includesWord(t, "cap")) return "3";
-  if (includesWord(t, "bep")) return "3";
+  // Niv 6
+  if (includesWord(t, "ingenieur") || includesWord(t, "master") || includesWord(t, "but") || includesWord(t, "licence") || includesWord(t, "bachelor")) return "6";
 
+  // Niv 5
+  if (includesWord(t, "btsa") || includesWord(t, "bts") || includesWord(t, "dut")) return "5";
+
+  // Niv 4
   if (includesPhrase(t, "brevet professionnel") || includesWord(t, "bp")) return "4";
   if (includesPhrase(t, "bac pro") || includesPhrase(t, "baccalaureat professionnel")) return "4";
+  if (includesWord(t, "technicien")) return "4";
 
-  if (includesWord(t, "btsa") || includesWord(t, "bts")) return "5";
-
-  if (includesWord(t, "but") || includesWord(t, "dut") || includesWord(t, "licence") || includesWord(t, "bachelor")) return "6";
+  // Niv 3
+  if (includesPhrase(t, "capa") || includesWord(t, "cap")) return "3";
+  if (includesWord(t, "bep") || includesWord(t, "bepa")) return "3";
+  if (includesWord(t, "bpa")) return "3";
 
   return "N/A";
 }
 
 // ==================================================================================
-// 3) THEME GUARD (ULTRA) - Anti hors-thème universel
+// 3) THEME GUARD (ULTRA)
 // ==================================================================================
 
-type ThemeDomain =
-  | "security"
-  | "construction"
-  | "it"
-  | "finance"
-  | "hospitality"
-  | "health"
-  | "law"
-  | "beauty_fashion"
-  | "tourism_transport_people"
-  | "forestry"
-  | "animal_equestrian"
-  | "driving_road_heavy"
-  | "education_childcare"
-  | "sport_coaching";
+type ThemeDomain = "security" | "construction" | "it" | "finance" | "hospitality" | "health" | "law" | "beauty_fashion" | "tourism_transport_people" | "forestry" | "animal_equestrian" | "driving_road_heavy" | "education_childcare" | "sport_coaching";
 
 const THEME_BANNED: Record<ThemeDomain, string[]> = {
   security: ["securite", "surete", "agent de securite", "ssi", "incendie", "vigile", "surveillance", "cynophile"],
-  construction: [
-    "btp",
-    "batiment",
-    "chantier",
-    "macon",
-    "maconnerie",
-    "carrelage",
-    "plomberie",
-    "electricien",
-    "peintre",
-    "menuiserie",
-    "charpente",
-    "couvreur",
-    "grutier",
-    "grue",
-    "engins de chantier",
-    "terrassement",
-    "vrd",
-  ],
+  construction: ["btp", "batiment", "chantier", "macon", "maconnerie", "carrelage", "plomberie", "electricien", "peintre", "menuiserie", "charpente", "couvreur", "grutier", "grue", "engins de chantier", "terrassement", "vrd"],
   it: ["informatique", "developpeur", "programmation", "code", "web", "wordpress", "reseau", "cybersecurite", "systeme", "data", "cloud", "devops", "sql"],
   finance: ["banque", "assurance", "immobilier", "credit", "finance", "patrimoine", "courtier", "comptable", "audit financier"],
   hospitality: ["cuisine", "restauration", "hotellerie", "cuisinier", "serveur", "barman", "chef de rang", "barista"],
   health: ["infirmier", "infirmiere", "aide soignant", "medical", "pharmacie", "ambulancier", "sage femme"],
   law: ["avocat", "notaire", "juridique", "droit", "huissier"],
   beauty_fashion: ["esthetique", "coiffure", "cosmetique", "mode", "textile", "spa", "maquillage"],
-  tourism_transport_people: [
-    "tourisme",
-    "voyageurs",
-    "transport de personnes",
-    "chauffeur de bus",
-    "bus",
-    "autocar",
-    "taxi",
-    "vtc",
-    "conducteur de voyageurs",
-    "transport urbain",
-  ],
+  tourism_transport_people: ["tourisme", "voyageurs", "transport de personnes", "chauffeur de bus", "bus", "autocar", "taxi", "vtc", "conducteur de voyageurs", "transport urbain"],
   forestry: ["forestier", "foret", "sylviculture", "bucheronnage", "debardage", "elagage", "abattage", "tronconneuse", "grume", "grumier"],
   animal_equestrian: ["equestre", "equitation", "cheval", "chevaux", "attelage", "attelages", "palefrenier"],
   driving_road_heavy: ["routier", "transport routier", "longue distance", "messagerie", "livraison longue distance", "fimo", "fco", "conducteur routier", "poids lourd", "spl", "super lourd"],
@@ -228,20 +176,7 @@ const THEME_BANNED: Record<ThemeDomain, string[]> = {
   sport_coaching: ["coach sportif", "sport", "fitness", "bpjeps", "entrainement"],
 };
 
-// bannis partout
-const DEFAULT_BANNED_DOMAINS: ThemeDomain[] = [
-  "security",
-  "construction",
-  "it",
-  "finance",
-  "hospitality",
-  "health",
-  "law",
-  "beauty_fashion",
-  "tourism_transport_people",
-  "education_childcare",
-  "sport_coaching",
-];
+const DEFAULT_BANNED_DOMAINS: ThemeDomain[] = ["security", "construction", "it", "finance", "hospitality", "health", "law", "beauty_fashion", "tourism_transport_people", "education_childcare", "sport_coaching"];
 
 const JOB_EXTRA_BANNED_DOMAINS: Record<string, ThemeDomain[]> = {
   chauffeur: ["forestry", "animal_equestrian", "driving_road_heavy"],
@@ -255,7 +190,6 @@ const JOB_EXTRA_BANNED_DOMAINS: Record<string, ThemeDomain[]> = {
 function getThemeBannedList(jobKey: string): string[] {
   const domains = new Set<ThemeDomain>(DEFAULT_BANNED_DOMAINS);
   (JOB_EXTRA_BANNED_DOMAINS[jobKey] ?? []).forEach((d) => domains.add(d));
-
   const terms: string[] = [];
   for (const d of domains) terms.push(...THEME_BANNED[d]);
   return terms.map(cleanText).filter(Boolean);
@@ -270,13 +204,13 @@ function isThemeBanned(jobKey: string, fullText: string): boolean {
 }
 
 // ==================================================================================
-// 3bis) HARD FILTER METIER (anti "hors métier" même si agricole)
+// 3bis) HARD FILTER METIER (POUR LBA & PERPLEXITY)
 // ==================================================================================
 
 type HardRules = {
-  must_any?: string[]; // au moins 1 mot/phrase présent
-  must_none?: string[]; // aucun mot/phrase présent
-  strict_min_must_hits?: number; // nb minimum de hits sur must_any (default 1)
+  must_any?: string[];
+  must_none?: string[];
+  strict_min_must_hits?: number;
 };
 
 function countHitsList(fullText: string, list?: string[]): number {
@@ -309,74 +243,25 @@ function shouldKeepByHardRules(jobKey: string, title: string, org: string): bool
 
 const HARD_RULES_BY_JOB: Record<string, HardRules> = {
   chauffeur: {
-    // exige un signal clair "engins / machinisme / récolte"
-    must_any: [
-      "tracteur",
-      "machinisme",
-      "machines agricoles",
-      "machine agricole",
-      "conduite d engins",
-      "engins agricoles",
-      "moissonneuse",
-      "ensileuse",
-      "pulverisateur",
-      "pulverisateur",
-      "remorque",
-      "benne",
-      "recolte",
-      "travaux agricoles",
-      "agroequipement",
-      "agro equipement",
-      // inclus si présent dans ton dataset / libellés
-      "conduite et gestion de l entreprise agricole",
-      "cgea",
-      "cima",
-      "conduite de machines agricoles",
-      "conducteur de machines agricoles",
-      "pilotage de machines agricoles",
-    ],
-    // rejette les filières agricoles mais pas "chauffeur"
-    must_none: [
-      "amenagements paysagers",
-      "aménagements paysagers",
-      "paysagiste",
-      "fleuriste",
-      "horticulture",
-      "viticulture",
-      "oenologie",
-      "œnologie",
-      "commercialisation des vins",
-      "vins",
-      "bieres",
-      "bières",
-      "spiritueux",
-      "equins",
-      "equin",
-      "cheval",
-      "attelage",
-      "attelages",
-      "bac general",
-      "baccalaureat general",
-      "classe de 4eme",
-      "classe de 3eme",
-      "cycle orientation",
-      "college",
-    ],
+    must_any: ["tracteur", "machinisme", "machines agricoles", "machine agricole", "conduite d engins", "engins agricoles", "moissonneuse", "ensileuse", "pulverisateur", "remorque", "benne", "recolte", "travaux agricoles", "agroequipement", "agro equipement", "conduite et gestion de l entreprise agricole", "cgea", "cima", "conduite de machines agricoles", "conducteur de machines agricoles", "pilotage de machines agricoles"],
+    must_none: ["amenagements paysagers", "aménagements paysagers", "paysagiste", "fleuriste", "horticulture", "viticulture", "oenologie", "vins", "bieres", "spiritueux", "equins", "equin", "cheval", "attelage", "attelages", "bac general", "classe de 4eme", "classe de 3eme", "cycle orientation", "college"],
   },
 
   silo: {
-    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "tri", "reception", "expedition", "élévateur", "elevateur"],
+    // ✅ CORRIGÉ : Ajout de "industries agro" pour matcher LBA comme RefEA
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "tri", "reception", "expedition", "élévateur", "elevateur", "industries agroalimentaires", "bio industries", "conduite de systemes industriels", "transformation"],
     must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
   },
 
   responsable_silo: {
-    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "qualite", "qualité", "reception", "expedition", "stocks"],
+     // ✅ CORRIGÉ
+    must_any: ["silo", "cereales", "céréales", "grain", "collecte", "stockage", "sechage", "séchage", "qualite", "qualité", "reception", "expedition", "stocks", "industries agroalimentaires"],
     must_none: ["eau", "hydraulique", "assainissement", "gestion et maitrise de l eau"],
   },
 
   technicien_culture: {
-    must_any: ["culture", "maraichage", "maraîchage", "grandes cultures", "agronomie", "sol", "fertilisation", "phyto", "phytosanitaire", "itineraire technique", "itinéraire technique"],
-    must_none: ["amenagements paysagers", "aménagements paysagers", "paysage", "paysager"],
+    must_any: ["culture", "maraichage", "maraîchage", "grandes cultures", "agronomie", "sol", "fertilisation", "phyto", "phytosanitaire", "itineraire technique", "itinéraire technique", "production vegetale"],
+    must_none: ["amenagements paysagers", "aménagements paysagers", "paysage", "paysager", "foret", "sylviculture"],
   },
 
   conducteur_ligne: {
@@ -432,54 +317,33 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: ["silo a ciment", "silo beton"],
     context_keywords: ["silo", "grain", "grains", "cereales", "collecte", "stockage", "sechage", "tri"],
     min_score: 36,
-    relaxed_min_score: 22,
     target_min_results: 8,
     max_extra_radius_km: 220,
     max_results: 60,
+    relaxed_min_score: 22,
     soft_distance_cap_km: 120,
     hard_distance_cap_km: 420,
   },
-
   chauffeur: {
     key: "chauffeur",
     label: "Chauffeur Agricole",
     romes: ["A1101"],
     fallback_romes: ["N4101", "N4102", "N4105", "N1303"],
     radius_km: 120,
-    strong_keywords: [
-      "tracteur",
-      "benne",
-      "remorque",
-      "moissonneuse",
-      "ensileuse",
-      "materiel agricole",
-      "machinisme",
-      "cereales",
-      "recolte",
-      "chauffeur",
-      "conduite",
-      "engins agricoles",
-      "travaux agricoles",
-      "agricole",
-      "permis ce",
-      "permis c",
-      "agro equipement",
-      "agroequipement",
-    ],
+    strong_keywords: ["tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "materiel agricole", "machinisme", "cereales", "recolte", "chauffeur", "conduite", "engins agricoles", "travaux agricoles", "agricole", "permis ce", "permis c", "agro equipement", "agroequipement"],
     synonyms: ["conducteur tracteur", "conduite d engins agricoles", "transport agricole", "chauffeur agricole"],
     weak_keywords: ["transport", "livraison", "route", "logistique"],
     banned_keywords: ["bus", "taxi", "ambulance", "vtc", "tourisme", "voyageurs", "cheval", "chevaux", "attelage", "attelages", "equitation", "equestre"],
     banned_phrases: ["transport de personnes", "chauffeur de bus", "conduite d attelages", "attelages de chevaux"],
     context_keywords: ["agricole", "tracteur", "benne", "remorque", "moissonneuse", "ensileuse", "cereales", "recolte", "engins", "machinisme"],
     min_score: 34,
-    relaxed_min_score: 20,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 60,
+    relaxed_min_score: 20,
     soft_distance_cap_km: 180,
     hard_distance_cap_km: 550,
   },
-
   responsable_silo: {
     key: "responsable_silo",
     label: "Responsable de Silo",
@@ -493,14 +357,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["silo", "cereales", "collecte", "stockage", "sechage", "tri", "reception", "expedition"],
     min_score: 36,
-    relaxed_min_score: 22,
     target_min_results: 6,
     max_extra_radius_km: 320,
     max_results: 50,
+    relaxed_min_score: 22,
     soft_distance_cap_km: 250,
     hard_distance_cap_km: 650,
   },
-
   maintenance: {
     key: "maintenance",
     label: "Responsable services techniques",
@@ -514,14 +377,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["maintenance", "mecanique", "electro", "automatismes", "depannage", "preventive", "curative", "industrie"],
     min_score: 32,
-    relaxed_min_score: 20,
     target_min_results: 8,
     max_extra_radius_km: 280,
     max_results: 60,
+    relaxed_min_score: 20,
     soft_distance_cap_km: 180,
     hard_distance_cap_km: 600,
   },
-
   technico: {
     key: "technico",
     label: "Technico-commercial",
@@ -535,14 +397,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["commercial", "technico", "vente", "negociation", "relation client", "agricole", "agroalimentaire", "agrofourniture"],
     min_score: 30,
-    relaxed_min_score: 18,
     target_min_results: 10,
     max_extra_radius_km: 320,
     max_results: 60,
+    relaxed_min_score: 18,
     soft_distance_cap_km: 220,
     hard_distance_cap_km: 650,
   },
-
   responsable_logistique: {
     key: "responsable_logistique",
     label: "Responsable logistique",
@@ -556,14 +417,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: ["chauffeur de bus", "transport urbain"],
     context_keywords: ["logistique", "entrepot", "stocks", "flux", "transport", "expedition", "reception", "approvisionnement"],
     min_score: 28,
-    relaxed_min_score: 16,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 80,
+    relaxed_min_score: 16,
     soft_distance_cap_km: 200,
     hard_distance_cap_km: 600,
   },
-
   magasinier_cariste: {
     key: "magasinier_cariste",
     label: "Magasinier / cariste",
@@ -577,14 +437,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["cariste", "caces", "magasinier", "entrepot", "stock", "preparation", "manutention", "logistique"],
     min_score: 26,
-    relaxed_min_score: 14,
     target_min_results: 12,
     max_extra_radius_km: 220,
     max_results: 120,
+    relaxed_min_score: 14,
     soft_distance_cap_km: 140,
     hard_distance_cap_km: 500,
   },
-
   controleur_qualite: {
     key: "controleur_qualite",
     label: "Contrôleur qualité",
@@ -598,14 +457,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["qualite", "controle", "conformite", "audit", "haccp", "tracabilite", "laboratoire", "analyse", "alimentaire", "agroalimentaire"],
     min_score: 28,
-    relaxed_min_score: 16,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 80,
+    relaxed_min_score: 16,
     soft_distance_cap_km: 200,
     hard_distance_cap_km: 650,
   },
-
   agreeur: {
     key: "agreeur",
     label: "Agréeur",
@@ -619,14 +477,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["agreeur", "agreage", "fruits", "legumes", "produits frais", "calibrage", "frais", "reception", "tri"],
     min_score: 28,
-    relaxed_min_score: 16,
     target_min_results: 8,
     max_extra_radius_km: 320,
     max_results: 60,
+    relaxed_min_score: 16,
     soft_distance_cap_km: 250,
     hard_distance_cap_km: 700,
   },
-
   conducteur_ligne: {
     key: "conducteur_ligne",
     label: "Conducteur de ligne",
@@ -640,14 +497,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["ligne", "production", "conditionnement", "reglage", "fabrication", "process", "machine", "agroalimentaire", "alimentaire"],
     min_score: 28,
-    relaxed_min_score: 16,
     target_min_results: 10,
     max_extra_radius_km: 280,
     max_results: 80,
+    relaxed_min_score: 16,
     soft_distance_cap_km: 220,
     hard_distance_cap_km: 650,
   },
-
   technicien_culture: {
     key: "technicien_culture",
     label: "Technicien culture",
@@ -661,14 +517,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["culture", "agronomie", "maraichage", "grandes cultures", "parcelles", "irrigation", "fertilisation", "phyto"],
     min_score: 26,
-    relaxed_min_score: 16,
     target_min_results: 6,
     max_extra_radius_km: 380,
     max_results: 60,
+    relaxed_min_score: 16,
     soft_distance_cap_km: 300,
     hard_distance_cap_km: 850,
   },
-
   commercial_export: {
     key: "commercial_export",
     label: "Commercial export",
@@ -682,14 +537,13 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_phrases: [],
     context_keywords: ["export", "international", "import", "douane", "incoterms", "commerce international", "business international"],
     min_score: 26,
-    relaxed_min_score: 16,
     target_min_results: 8,
     max_extra_radius_km: 480,
     max_results: 60,
+    relaxed_min_score: 16,
     soft_distance_cap_km: 320,
     hard_distance_cap_km: 950,
   },
-
   default: {
     key: "default",
     label: "Recherche Générale",
@@ -702,10 +556,10 @@ const JOB_CONFIG: Record<string, JobProfile> = {
     banned_keywords: [],
     banned_phrases: [],
     min_score: 18,
-    relaxed_min_score: 12,
     target_min_results: 8,
     max_extra_radius_km: 220,
     max_results: 80,
+    relaxed_min_score: 12,
     soft_distance_cap_km: 180,
     hard_distance_cap_km: 600,
   },
@@ -722,21 +576,16 @@ type ScoredFormation = {
   city: string | null;
   lat: number | null;
   lon: number | null;
-
   url: string | null;
   romes: any[] | null;
   diplomaLevel: any;
-
   distanceKm: number | null;
   score: number;
-
   _reasonsInternal: string[];
   reasons: string[];
-
   ctxHits: number;
   strongHits: number;
   synHits: number;
-
   _dedupKey: string;
 };
 
@@ -780,23 +629,13 @@ function buildUserReasons(args: {
 }
 
 function applyChauffeurAntiRoutierPure(fullText: string, phase: Phase, hasThemeSignal: boolean) {
-  const looksRoutier =
-    includesWord(fullText, "routier") ||
-    includesPhrase(fullText, "transport routier") ||
-    includesPhrase(fullText, "longue distance") ||
-    includesWord(fullText, "messagerie") ||
-    includesWord(fullText, "poids lourd") ||
-    includesWord(fullText, "spl");
-
+  const looksRoutier = includesWord(fullText, "routier") || includesPhrase(fullText, "transport routier") || includesPhrase(fullText, "longue distance") || includesWord(fullText, "messagerie") || includesWord(fullText, "poids lourd") || includesWord(fullText, "spl");
   if (!looksRoutier) return { reject: false, penalty: 0 };
-
-  // Si routier et aucun signal agricole => rejet/forte pénalité
   if (!hasThemeSignal) {
     if (phase === "strict") return { reject: true, penalty: 999 };
     if (phase === "relaxed") return { reject: false, penalty: 30 };
     return { reject: false, penalty: 18 };
   }
-
   return { reject: false, penalty: 0 };
 }
 
@@ -804,16 +643,12 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   const title = raw?.title || "";
   const companyName = raw?.company?.name || "Organisme inconnu";
   const city = raw?.place?.city ?? null;
-
   const lat = typeof raw?.place?.latitude === "number" ? raw.place.latitude : null;
   const lon = typeof raw?.place?.longitude === "number" ? raw.place.longitude : null;
-
   const fullText = cleanText(`${title} ${companyName}`);
 
-  // ✅ THEME GUARD (universel)
   if (isThemeBanned(config.key, fullText)) return null;
 
-  // bannissements spécifiques job (phrases/keywords)
   for (const p of (config.banned_phrases ?? []).map(cleanText).filter(Boolean)) {
     if (includesPhrase(fullText, p)) return null;
   }
@@ -826,10 +661,7 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 
   let score = 0;
   const reasonsInternal: string[] = [];
-
-  const hasRome = Array.isArray(raw?.romes)
-    ? raw.romes.some((r: any) => (config.romes ?? []).includes(r?.code))
-    : false;
+  const hasRome = Array.isArray(raw?.romes) ? raw.romes.some((r: any) => (config.romes ?? []).includes(r?.code)) : false;
 
   if (hasRome) {
     score += 22;
@@ -860,13 +692,11 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
 
   const hasThemeSignal = ctxHits > 0 || strongHits > 0 || synHits > 0;
 
-  // ✅ STRICT : si aucun signal métier => rejet direct
   if (phase === "strict") {
     if (!hasThemeSignal && !hasRome) return null;
     if ((config.context_keywords?.length ?? 0) > 0 && !hasThemeSignal) return null;
   }
 
-  // Chauffeur : anti routier pur
   if (config.key === "chauffeur") {
     const ar = applyChauffeurAntiRoutierPure(fullText, phase, hasThemeSignal);
     if (ar.reject) return null;
@@ -876,12 +706,10 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
     }
   }
 
-  // distance scoring
   if (dist !== null) {
     if (dist <= 10) score += 8;
     else if (dist <= 25) score += 5;
     else if (dist <= 50) score += 2;
-
     if (dist > config.radius_km) score -= 6;
 
     const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
@@ -892,7 +720,6 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
       score -= (phase === "fallback" ? 6 : 8) + extra;
       reasonsInternal.push("far");
     }
-
     if (dist > hard) {
       score -= phase === "fallback" ? 18 : 28;
       reasonsInternal.push("very_far");
@@ -903,34 +730,10 @@ function scoreFormation(raw: any, config: JobProfile, userLat: number, userLon: 
   }
 
   const id = raw?.id || crypto.randomUUID();
-
-  const userReasons = buildUserReasons({
-    hasRome,
-    ctxHits,
-    strongHits,
-    synHits,
-    dist,
-    config,
-  });
+  const userReasons = buildUserReasons({ hasRome, ctxHits, strongHits, synHits, dist, config });
 
   return {
-    id,
-    title,
-    companyName,
-    city,
-    lat,
-    lon,
-    url: raw?.url || null,
-    romes: raw?.romes || null,
-    diplomaLevel: raw?.diplomaLevel,
-    distanceKm: dist,
-    score,
-    _reasonsInternal: reasonsInternal,
-    reasons: userReasons,
-    ctxHits,
-    strongHits,
-    synHits,
-    _dedupKey: makeDedupKey(title, companyName, city),
+    id, title, companyName, city, lat, lon, url: raw?.url || null, romes: raw?.romes || null, diplomaLevel: raw?.diplomaLevel, distanceKm: dist, score, _reasonsInternal: reasonsInternal, reasons: userReasons, ctxHits, strongHits, synHits, _dedupKey: makeDedupKey(title, companyName, city),
   };
 }
 
@@ -949,16 +752,9 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 }
 
 async function fetchLBA(romes: string[], lat: number, lon: number, radiusKm: number) {
-  const url =
-    `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations` +
-    `?romes=${encodeURIComponent(romes.join(","))}` +
-    `&latitude=${lat}&longitude=${lon}` +
-    `&radius=${radiusKm}` +
-    `&caller=ocapiat_app`;
-
+  const url = `https://labonnealternance.apprentissage.beta.gouv.fr/api/v1/formations?romes=${encodeURIComponent(romes.join(","))}&latitude=${lat}&longitude=${lon}&radius=${radiusKm}&caller=ocapiat_app`;
   const res = await fetchWithTimeout(url, { method: "GET" }, FETCH_TIMEOUT_MS);
   if (!res.ok) return { results: [], raw_count: 0, status: res.status };
-
   const data = await res.json().catch(() => null);
   const results = Array.isArray(data?.results) ? data.results : [];
   return { results, raw_count: results.length, status: 200 };
@@ -979,7 +775,6 @@ function dedupSmart(items: ScoredFormation[], maxPerTitle = 3) {
     seen.add(k);
     return true;
   });
-
   const counts = new Map<string, number>();
   const limited = unique.filter((s) => {
     const tk = cleanText(s.title);
@@ -987,25 +782,20 @@ function dedupSmart(items: ScoredFormation[], maxPerTitle = 3) {
     counts.set(tk, c);
     return c <= maxPerTitle;
   });
-
   return limited;
 }
 
 function mergeKeepBest(base: ScoredFormation[], extra: ScoredFormation[]) {
   const map = new Map<string, ScoredFormation>();
-
   const keep = (s: ScoredFormation) => {
     const k = s._dedupKey;
     const existing = map.get(k);
     if (!existing) return map.set(k, s);
-
     const best = [existing, s].sort(sortByScoreThenDistance)[0];
     map.set(k, best);
   };
-
   base.forEach(keep);
   extra.forEach(keep);
-
   return Array.from(map.values()).sort(sortByScoreThenDistance);
 }
 
@@ -1019,86 +809,39 @@ function pickByThreshold(scored: ScoredFormation[], minScore: number, cap: numbe
 // 7) STRICT ADAPTATIF + POOL RAW POUR RESCORE
 // ==================================================================================
 
-async function getStrictAndPoolRaw(
-  config: JobProfile,
-  userLat: number,
-  userLon: number
-): Promise<{
-  strictKept: ScoredFormation[];
-  bestRawPool: any[];
-  appliedRadius: number;
-  expanded: boolean;
-  debug: {
-    raw_count_last: number;
-    scored_count_last: number;
-    kept_count_strict_last: number;
-    best_pool_raw_count: number;
-    last_status?: number;
-  };
-}> {
+async function getStrictAndPoolRaw(config: JobProfile, userLat: number, userLon: number): Promise<{ strictKept: ScoredFormation[]; bestRawPool: any[]; appliedRadius: number; expanded: boolean; debug: any }> {
   const baseRadius = config.radius_km;
-
-  // steps = extension MAX (on respecte max_extra_radius_km)
-  const rawSteps = [0, 30, 60, 100, 150, 200, 300, 420];
-  const steps = rawSteps.filter((s) => s <= config.max_extra_radius_km);
-
+  const steps = [0, 30, 60, 100, 150, 200, 300, 420].filter((s) => s <= config.max_extra_radius_km);
   let appliedRadius = baseRadius;
   let expanded = false;
-
   let raw_count_last = 0;
   let scored_count_last = 0;
   let kept_count_strict_last = 0;
   let last_status: number | undefined;
-
   let finalStrict: ScoredFormation[] = [];
-
   let bestRawPool: any[] = [];
   let bestRawCount = -1;
 
   for (const extra of steps) {
     appliedRadius = baseRadius + extra;
     expanded = extra > 0;
-
     const fetched = await fetchLBA(config.romes, userLat, userLon, appliedRadius);
     const raw = fetched.results;
-
     raw_count_last = fetched.raw_count;
     last_status = fetched.status;
-
     if (raw_count_last > bestRawCount) {
       bestRawCount = raw_count_last;
       bestRawPool = raw;
     }
-
-    const scoredAll = raw
-      .map((r: any) => scoreFormation(r, config, userLat, userLon, "strict"))
-      .filter(Boolean) as ScoredFormation[];
-
+    const scoredAll = raw.map((r: any) => scoreFormation(r, config, userLat, userLon, "strict")).filter(Boolean) as ScoredFormation[];
     scored_count_last = scoredAll.length;
-
     const keptStrict = scoredAll.filter((s) => s.score >= config.min_score);
     kept_count_strict_last = keptStrict.length;
-
     finalStrict = dedupSmart(keptStrict, 3).sort(sortByScoreThenDistance);
-
     if (DEBUG) console.log("radius", appliedRadius, "raw", raw_count_last, "strict", finalStrict.length);
-
     if (finalStrict.length >= config.target_min_results) break;
   }
-
-  return {
-    strictKept: finalStrict,
-    bestRawPool,
-    appliedRadius,
-    expanded,
-    debug: {
-      raw_count_last,
-      scored_count_last,
-      kept_count_strict_last,
-      best_pool_raw_count: bestRawPool.length,
-      last_status,
-    },
-  };
+  return { strictKept: finalStrict, bestRawPool, appliedRadius, expanded, debug: { raw_count_last, scored_count_last, kept_count_strict_last, best_pool_raw_count: bestRawPool.length, last_status } };
 }
 
 // ==================================================================================
@@ -1110,7 +853,6 @@ const METIER_KEY_ALIASES: Record<string, string> = {
   magasinier: "magasinier_cariste",
   services_tech: "maintenance",
   qualite: "controleur_qualite",
-
   responsable_logistique: "responsable_logistique",
   magasinier_cariste: "magasinier_cariste",
   controleur_qualite: "controleur_qualite",
@@ -1120,42 +862,31 @@ const METIER_KEY_ALIASES: Record<string, string> = {
 function detectJobKey(inputMetier: any): string {
   const raw = (inputMetier ?? "").toString().trim();
   const cleaned = cleanText(raw);
-
   if (METIER_KEY_ALIASES[raw]) return METIER_KEY_ALIASES[raw];
   if (METIER_KEY_ALIASES[cleaned]) return METIER_KEY_ALIASES[cleaned];
-
   if ((JOB_CONFIG as any)[raw]) return raw;
   if ((JOB_CONFIG as any)[cleaned]) return cleaned;
-
   if (cleaned.includes("responsable") && cleaned.includes("silo")) return "responsable_silo";
   if (cleaned.includes("silo")) return "silo";
-
   if (cleaned.includes("chauffeur") || cleaned.includes("conduite")) return "chauffeur";
-
   if (cleaned.includes("commercial") && cleaned.includes("export")) return "commercial_export";
   if (cleaned.includes("export")) return "commercial_export";
   if (cleaned.includes("technico")) return "technico";
   if (cleaned.includes("commercial")) return "technico";
-
   if (cleaned.includes("logistique")) return "responsable_logistique";
   if (cleaned.includes("magasinier") || cleaned.includes("cariste")) return "magasinier_cariste";
-
   if (cleaned.includes("qualite") && (cleaned.includes("controle") || cleaned.includes("controleur"))) return "controleur_qualite";
   if (cleaned.includes("agreeur")) return "agreeur";
-
   if (cleaned.includes("conducteur") && cleaned.includes("ligne")) return "conducteur_ligne";
-
   if (cleaned.includes("technicien") && cleaned.includes("culture")) return "technicien_culture";
   if (cleaned.includes("culture") || cleaned.includes("agronomie")) return "technicien_culture";
-
   if (cleaned.includes("services") && cleaned.includes("tech")) return "maintenance";
   if (cleaned.includes("maintenance")) return "maintenance";
-
   return "default";
 }
 
 // ==================================================================================
-// 9) GEO (anti "Mont", "St", etc.)
+// 9) GEO
 // ==================================================================================
 
 const AMBIGUOUS_CITY_TOKENS = new Set(["mont", "st", "ste", "saint", "sainte", "saints", "s"]);
@@ -1165,58 +896,33 @@ function isAmbiguousCityInput(ville: string) {
   const c = cleanText(q);
   if (q.length < 4) return true;
   if (AMBIGUOUS_CITY_TOKENS.has(c)) return true;
-
   const parts = c.split(" ").filter(Boolean);
   if (parts.length === 1 && AMBIGUOUS_CITY_TOKENS.has(parts[0])) return true;
-
   return false;
 }
 
-async function geocodeCityOrThrow(ville: string): Promise<{
-  userLat: number;
-  userLon: number;
-  villeRef: string;
-  geoScore: number;
-  geoTypeTried: string;
-}> {
+async function geocodeCityOrThrow(ville: string): Promise<{ userLat: number; userLon: number; villeRef: string; geoScore: number; geoTypeTried: string }> {
   const q = ville.trim();
-
-  if (isAmbiguousCityInput(q)) {
-    throw new Error("Ville ambiguë. Merci d'indiquer le nom complet (ex: Montauban, Montpellier, Montélimar, Saint-Étienne…).");
-  }
-
+  if (isAmbiguousCityInput(q)) throw new Error("Ville ambiguë. Merci d'indiquer le nom complet (ex: Montauban, Montpellier, Montélimar, Saint-Étienne…).");
   const tries: Array<{ type: string; url: string; minScore: number }> = [
     { type: "municipality", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=municipality`, minScore: 0.45 },
     { type: "city", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1&type=city`, minScore: 0.45 },
     { type: "fallback", url: `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(q)}&limit=1`, minScore: 0.55 },
   ];
-
   for (const t of tries) {
     const rep = await fetchWithTimeout(t.url, { method: "GET" }, FETCH_TIMEOUT_MS);
     const data = await rep.json().catch(() => null);
     if (!data?.features?.length) continue;
-
     const f = data.features[0];
     const coords = f?.geometry?.coordinates;
     const props = f?.properties;
-
     if (!Array.isArray(coords) || coords.length < 2) continue;
-
     const [lon, lat] = coords;
     const label = props?.label || q;
     const score = typeof props?.score === "number" ? props.score : 0;
-
     if (score < t.minScore) continue;
-
-    return {
-      userLat: lat,
-      userLon: lon,
-      villeRef: label,
-      geoScore: score,
-      geoTypeTried: t.type,
-    };
+    return { userLat: lat, userLon: lon, villeRef: label, geoScore: score, geoTypeTried: t.type };
   }
-
   throw new Error("Ville inconnue ou trop ambiguë. Merci de préciser (ex: Montélimar, Mont-de-Marsan, Montauban…).");
 }
 
@@ -1226,253 +932,120 @@ async function geocodeCityOrThrow(ville: string): Promise<{
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
-
   try {
     const body = await req.json().catch(() => ({}));
     const metier = body?.metier;
     const ville = (body?.ville ?? "").toString().trim();
     const niveau = body?.niveau;
-
     if (!ville) throw new Error("Ville manquante");
 
     const jobKey = detectJobKey(metier);
     const config: JobProfile = (JOB_CONFIG as any)[jobKey] || (JOB_CONFIG as any).default;
-
     const geo = await geocodeCityOrThrow(ville);
     const userLat = geo.userLat;
     const userLon = geo.userLon;
     const villeRef = geo.villeRef;
 
-    // ✅ 0) REFEA D'ABORD (puis HARD FILTER métier)
-    const refeaRaw = searchRefEA({
+    // ✅ 0) REFEA D'ABORD
+    // On ne filtre plus RefEA ici, car searchRefEA utilise déjà les règles "Blindées" de refeaRules.ts
+    const refeaResults = searchRefEA({
       jobLabel: config.label,
       ville: villeRef,
       userLat,
       userLon,
       radiusKm: 250,
-      limit: 40, // on prend plus large puis on filtre dur
-    });
+      limit: 40,
+    }) || [];
 
-    const refeaResults = (refeaRaw || []).filter((f: any) =>
-      shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? "")
-    );
-
-    // mapped = liste de résultats qu'on va renvoyer (on commence par RefEA)
     let mapped = refeaResults;
-
     const target = Math.max(6, config.target_min_results);
     const cap = config.max_results ?? 60;
 
+    // ✅ 1) LBA SEARCH
     const { strictKept, bestRawPool, appliedRadius, expanded, debug } = await getStrictAndPoolRaw(config, userLat, userLon);
-
     let mode: Mode = "strict";
     let merged: ScoredFormation[] = strictKept;
 
-    // 1) RELAXED
     if (merged.length < target) {
-      const relaxedScored = bestRawPool
-        .map((r: any) => scoreFormation(r, config, userLat, userLon, "relaxed"))
-        .filter(Boolean) as ScoredFormation[];
-
+      const relaxedScored = bestRawPool.map((r: any) => scoreFormation(r, config, userLat, userLon, "relaxed")).filter(Boolean) as ScoredFormation[];
       const relaxedMin = config.relaxed_min_score ?? Math.max(12, config.min_score - 12);
       const relaxedPicked = pickByThreshold(dedupSmart(relaxedScored, 3), relaxedMin, cap);
-
       merged = mergeKeepBest(merged, relaxedPicked);
       mode = merged.length > 0 ? "strict+relaxed" : "relaxed";
     }
 
-    // 2) FALLBACK ROME
     if (merged.length < target) {
       const fallbackRomes = Array.from(new Set([...(config.fallback_romes ?? []), ...config.romes])).filter(Boolean);
-
       if (fallbackRomes.length > 0) {
         const fbRadius = Math.max(appliedRadius, config.radius_km + 150);
-
         const fetchedFB = await fetchLBA(fallbackRomes, userLat, userLon, fbRadius);
         const rawFB = fetchedFB.results;
-
-        const scoredFB = rawFB
-          .map((r: any) => scoreFormation(r, config, userLat, userLon, "fallback"))
-          .filter(Boolean) as ScoredFormation[];
-
+        const scoredFB = rawFB.map((r: any) => scoreFormation(r, config, userLat, userLon, "fallback")).filter(Boolean) as ScoredFormation[];
         const relaxedMin = config.relaxed_min_score ?? Math.max(12, config.min_score - 12);
         const pickedFB = pickByThreshold(dedupSmart(scoredFB, 3), relaxedMin, cap);
-
         merged = mergeKeepBest(merged, pickedFB);
-
         if (mode === "strict") mode = "fallback_rome";
         else if (mode === "strict+relaxed") mode = "strict+relaxed+fallback_rome";
         else mode = "fallback_rome";
       }
     }
 
-    // Final LBA list
     merged = dedupSmart(merged, 3).sort(sortByScoreThenDistance);
     if (merged.length > cap) merged = merged.slice(0, cap);
 
     const niveauFiltre = normalizeNiveauFilter(niveau);
-
     const mappedLBA = merged.map((s) => {
       const computedNiveau = inferNiveau(s.diplomaLevel, s.title);
       const distRounded = s.distanceKm === null ? 999 : round1(s.distanceKm);
-
       return {
-        id: s.id,
-        intitule: s.title,
-        organisme: s.companyName,
-        ville: s.city ?? villeRef,
-        lat: s.lat ?? undefined,
-        lon: s.lon ?? undefined,
-        distance_km: distRounded,
-        rncp: "Non renseigné",
-        modalite: "Non renseigné",
-        alternance: "Non renseigné",
-        categorie: "Diplôme / Titre",
-        site_web: s.url,
-        url: s.url,
-        niveau: computedNiveau,
-        match: { score: s.score, reasons: s.reasons },
+        id: s.id, intitule: s.title, organisme: s.companyName, ville: s.city ?? villeRef, lat: s.lat ?? undefined, lon: s.lon ?? undefined, distance_km: distRounded, rncp: "Non renseigné", modalite: "Non renseigné", alternance: "Non renseigné", categorie: "Diplôme / Titre", site_web: s.url, url: s.url, niveau: computedNiveau, match: { score: s.score, reasons: s.reasons },
       };
     });
 
     // ✅ HARD FILTER métier sur LBA
-    const mappedLBAFiltered = mappedLBA.filter((f: any) =>
-      shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? "")
-    );
-
-    // Merge RefEA + LBA (RefEA en premier)
+    const mappedLBAFiltered = mappedLBA.filter((f: any) => shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? ""));
     mapped = mergeFormationsWithoutDuplicates(mapped, mappedLBAFiltered);
 
-    // ==================================================================================
-    // PERPLEXITY ENRICHMENT (complément)
-    // ==================================================================================
-
+    // ✅ 2) PERPLEXITY (Complément)
     let perplexityUsed = false;
     let allFormations = mapped;
 
-    if (
-      shouldEnrichWithPerplexity(mapped, {
-        min_results: MIN_RESULTS_BEFORE_ENRICH,
-        max_distance: MAX_AVG_DISTANCE_BEFORE_ENRICH,
-      })
-    ) {
+    if (shouldEnrichWithPerplexity(mapped, { min_results: MIN_RESULTS_BEFORE_ENRICH, max_distance: MAX_AVG_DISTANCE_BEFORE_ENRICH })) {
       try {
         const missing = Math.max(0, MIN_RESULTS_BEFORE_ENRICH - mapped.length);
-
-        const perplexityInput: PerplexityFormationInput = {
-          metierLabel: config.label,
-          villeRef,
-          lat: userLat,
-          lon: userLon,
-          limit: Math.max(3, Math.min(12, missing || 5)),
-        };
-
+        const perplexityInput: PerplexityFormationInput = { metierLabel: config.label, villeRef, lat: userLat, lon: userLon, limit: Math.max(3, Math.min(12, missing || 5)) };
         const pplxRaw = await fetchPerplexityFormations(perplexityInput);
-
-        // Filtrage dur Perplexity (distance + champs)
         const hardCap = getPerplexityHardCap(config);
-
-        const pplxSafe = (pplxRaw || [])
-          .filter((f: any) => f && typeof f?.distance_km === "number")
-          .filter((f: any) => f.distance_km >= 0 && f.distance_km < 900)
-          .filter((f: any) => f.distance_km <= hardCap)
-          .map((f: any) => ({
-            ...f,
-            alternance: "Non renseigné",
-            modalite: "Non renseigné",
-            rncp: "Non renseigné",
-            match: {
-              score: PERPLEXITY_SCORE,
-              reasons:
-                Array.isArray(f?.match?.reasons) && f.match.reasons.length
-                  ? f.match.reasons.slice(0, MAX_WHY_REASONS)
-                  : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS),
-            },
-          }));
-
-        // ✅ HARD FILTER métier sur Perplexity
-        const pplxFinal = pplxSafe.filter((f: any) =>
-          shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? "")
-        );
-
+        const pplxSafe = (pplxRaw || []).filter((f: any) => f && typeof f?.distance_km === "number").filter((f: any) => f.distance_km >= 0 && f.distance_km < 900).filter((f: any) => f.distance_km <= hardCap).map((f: any) => ({
+          ...f, alternance: "Non renseigné", modalite: "Non renseigné", rncp: "Non renseigné", match: { score: PERPLEXITY_SCORE, reasons: Array.isArray(f?.match?.reasons) && f.match.reasons.length ? f.match.reasons.slice(0, MAX_WHY_REASONS) : ["Formation complémentaire vérifiée", "Correspond au métier recherché"].slice(0, MAX_WHY_REASONS) },
+        }));
+        const pplxFinal = pplxSafe.filter((f: any) => shouldKeepByHardRules(jobKey, f?.intitule ?? "", f?.organisme ?? ""));
         if (pplxFinal.length > 0) {
           perplexityUsed = true;
           allFormations = mergeFormationsWithoutDuplicates(mapped, pplxFinal);
-          if (DEBUG) console.log(`Perplexity added=${pplxFinal.length}, total=${allFormations.length}`);
         }
-      } catch (error) {
-        console.error("Perplexity enrichment failed:", error);
-      }
+      } catch (error) { console.error("Perplexity enrichment failed:", error); }
     }
-
-    // ==================================================================================
-    // Filtre niveau + tri final
-    // ==================================================================================
-
-    const count_total_avant_filtre = allFormations.length;
 
     let results = allFormations;
     if (niveauFiltre !== "all") {
       results = results.filter((r: any) => r.niveau === niveauFiltre);
     }
-
     results.sort((a: any, b: any) => {
       const sa = a?.match?.score ?? 0;
       const sb = b?.match?.score ?? 0;
       if (sb !== sa) return sb - sa;
-
       const da = typeof a.distance_km === "number" ? a.distance_km : 9999;
       const db = typeof b.distance_km === "number" ? b.distance_km : 9999;
       return da - db;
     });
 
-    // Warnings
     const soft = config.soft_distance_cap_km ?? (config.radius_km + 150);
-    const maxDist = results.reduce((m: number, r: any) => {
-      const d = typeof r?.distance_km === "number" ? r.distance_km : 999;
-      return Math.max(m, d);
-    }, 0);
-
-    const noRelevantResults = results.length === 0;
-
-    return new Response(
-      JSON.stringify({
-        metier_detecte: config.label,
-        ville_reference: villeRef,
-        rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`,
-        niveau_filtre: niveauFiltre,
-        mode,
-
-        count_total: count_total_avant_filtre,
-        count: results.length,
-        formations: results,
-
-        warnings: {
-          far_results: maxDist > soft,
-          geocode_score: geo.geoScore,
-          geocode_type: geo.geoTypeTried,
-          no_relevant_results: noRelevantResults,
-          absolute_min_score: ABSOLUTE_MIN_SCORE,
-        },
-
-        debug: {
-          jobKey,
-          ...debug,
-          strict_count: strictKept.length,
-          merged_count_before_level_filter: count_total_avant_filtre,
-          final_count_after_level_filter: results.length,
-          perplexity_enrichment_used: perplexityUsed,
-          perplexity_score: PERPLEXITY_SCORE,
-          perplexity_hard_cap_km: getPerplexityHardCap(config),
-          hard_filter_enabled: true,
-        },
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    const maxDist = results.reduce((m: number, r: any) => { const d = typeof r?.distance_km === "number" ? r.distance_km : 999; return Math.max(m, d); }, 0);
+    return new Response(JSON.stringify({
+      metier_detecte: config.label, ville_reference: villeRef, rayon_applique: `${appliedRadius} km${expanded ? " (élargi automatiquement)" : ""}`, niveau_filtre: niveauFiltre, mode, count_total: count_total_avant_filtre, count: results.length, formations: results, warnings: { far_results: maxDist > soft, geocode_score: geo.geoScore, geocode_type: geo.geoTypeTried, no_relevant_results: results.length === 0, absolute_min_score: ABSOLUTE_MIN_SCORE }, debug: { jobKey, ...debug, strict_count: strictKept.length, perplexity_enrichment_used: perplexityUsed, hard_filter_enabled: true },
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: any) {
-    return new Response(
-      JSON.stringify({ error: error?.message || "Erreur inconnue" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: error?.message || "Erreur inconnue" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
