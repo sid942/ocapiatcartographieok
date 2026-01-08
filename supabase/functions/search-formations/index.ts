@@ -696,20 +696,9 @@ Deno.serve(async (req: Request) => {
     // ==================================================================================
     // 1) RefEA (source officielle) + WHITELIST EXCEL
     // ==================================================================================
-    let refeaResults: any[] = [];
-    try {
-      const refeaRadius = Math.min(config.radius_km + 50, 200);
-      refeaResults = searchRefEA({
-        jobLabel: config.label, // ruleKey() dans refeaSearch gère
-        ville,
-        userLat: userLat!,
-        userLon: userLon!,
-        radiusKm: refeaRadius,
-        limit: REFEA_MAX,
-      });
-    } catch (e) {
-      console.error("[RefEA] Error:", e);
-      refeaResults = [];
+    // ✅ TEMPORAIRE : RefEA OFF (évite timeout / bundle trop lourd)
+let refeaResults: any[] = [];
+
     }
 
     // ✅ Whitelist catalogue Excel (RefEA)
