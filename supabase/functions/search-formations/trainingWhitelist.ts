@@ -9,71 +9,83 @@ export type TrainingWhitelist = Record<
 >;
 
 export const TRAINING_WHITELIST: TrainingWhitelist = {
-  // =========================
-  // 1) TECHNICO
-  // =========================
+  // =========================================================
+  // 1) Technico Commercial
+  // jobKey = "technico"
+  // =========================================================
   technico: {
     allow: [
-      // BTSA / BTS
+      // Bac+2
       "btsa technico commercial",
+      "btsa technico-commercial",
       "btsa tc bsa",
-      "tc bsa",
       "btsa tc ab",
-      "tc ab",
       "btsa tc ujac",
-      "tc ujac",
       "bts technico commercial",
+      "bts technico-commercial",
       "bts tc",
+      "bts conseil et commercialisation de solutions techniques",
       "bts ccst",
-      "conseil et commercialisation de solutions techniques",
-      "commercialisation de solutions techniques",
-
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
-      "analyse conduite et strategie de l entreprise agricole",
+      "btsa agronomie et cultures durables",
       "btsa acd",
-      "agronomie et cultures durables",
       "btsa productions animales",
       "btsa pa",
+      "btsa genie des equipements agricoles",
       "btsa gdea",
-      "genie des equipements agricoles",
-
-      // Titres
-      "negociateur technico commercial",
+      "titre professionnel negociateur technico commercial",
+      "titre professionnel negociateur technico-commercial",
+      "tp negociateur technico commercial",
       "tp ntc",
       "rncp ntc",
 
-      // BUT / LP
+      // Bac+3
       "but techniques de commercialisation",
       "but tc",
       "dut techniques de commercialisation",
       "dut tc",
       "licence professionnelle technico commercial",
+      "licence professionnelle technico-commercial",
+      "lp technico commercial",
       "lp tc",
+      "licence professionnelle productions vegetales",
       "lp productions vegetales",
       "lp pv",
+      "licence professionnelle commerce et vente en agrofourniture",
       "lp commerce et vente en agrofourniture",
       "lp cva",
+      "licence professionnelle gestion des organisations agricoles et alimentaires",
       "lp gestion des organisations agricoles et alimentaires",
       "lp goaa",
+      "licence professionnelle agronomie",
       "lp agronomie",
       "lp agro",
-      "metiers du commerce international des produits agricoles et alimentaires",
+      "licence professionnelle metiers du commerce international des produits agricoles et alimentaires",
+      "lp metiers du commerce international des produits agricoles et alimentaires",
+      "lp mci",
       "lp mci-paa",
       "mci-paa",
 
-      // Master / RNCP / Ingé
-      "rncp rtc",
+      // Bac+4/5
+      "certification rncp responsable technico commercial",
       "responsable technico commercial",
+      "responsable technico-commercial",
+      "rncp rtc",
       "master commerce et vente",
       "master cv",
+      "master management des entreprises agricoles et agroalimentaires",
       "master meaa",
-      "management des entreprises agricoles et agroalimentaires",
+      "diplome d ingenieur agronome",
+      "diplome d’ingénieur agronome",
       "ingenieur agronome",
       "diplome agro",
     ],
     deny: [
       "marketing",
       "digital",
+      "numerique",
+      "numérique",
       "e-commerce",
       "e commerce",
       "immobilier",
@@ -83,71 +95,97 @@ export const TRAINING_WHITELIST: TrainingWhitelist = {
       "ux",
       "ui",
       "growth",
-      "business developer",
-      "business development",
-      "developpement commercial",
-      "développement commercial",
-      "developpement",
-      "développement",
+      "developpeur",
+      "développeur",
+      "dev web",
+      "developpement web",
+      "développement web",
+      "informatique",
+      "data",
+      "cyber",
+      "tourisme",
+      "hotellerie",
+      "hôtellerie",
+      "restauration",
+      "esthetique",
+      "esthétique",
     ],
   },
 
-  // =========================
-  // 2) CHAUFFEUR
-  // =========================
+  // =========================================================
+  // 2) Chauffeur agricole
+  // jobKey = "chauffeur"
+  // =========================================================
   chauffeur: {
     allow: [
+      // infra-bac
       "capa metiers de l agriculture",
+      "capa métiers de l agriculture",
       "capa ma",
       "capa productions agricoles",
       "capa pa",
       "capa grandes cultures",
       "capa gc",
       "capa agriculture des regions chaudes",
+      "capa agriculture des régions chaudes",
       "capa arc",
       "bpa travaux de la production agricole",
       "bpa tpa",
       "bpa travaux des cultures",
       "bpa tc",
+      "bpa travaux de conduite et entretien des engins agricoles",
       "bpa tceea",
-      "travaux de conduite et entretien des engins agricoles",
+      "bpa ouvrier agricole en grandes cultures",
       "bpa oagc",
       "bpa ouvrier agricole polyvalent",
       "bpa oap",
 
+      // bac
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
-      "conduite et gestion de l entreprise agricole",
+      "bac professionnel agroequipement",
       "bac pro agroequipement",
       "bac pro ae",
+      "bac professionnel productions vegetales",
       "bac pro productions vegetales",
       "bac pro pv",
+      "bac professionnel maintenance des materiels",
+      "bac pro maintenance des materiels",
       "bac pro mm ma",
-      "maintenance des materiels option materiels agricoles",
+      "brevet professionnel responsable d entreprise agricole",
       "bp rea",
-      "responsable d entreprise agricole",
-      "bp ae",
       "brevet professionnel agroequipement",
+      "bp agroequipement",
+      "bp ae",
+      "certificat de specialisation tractoriste",
+      "cs tractoriste",
+      "certificat de specialisation conducteur d engins agricoles",
       "cs tcea",
-      "tractoriste",
-      "conducteur d engins agricoles",
+      "cs tcea",
 
+      // bac+2
+      "btsa genie des equipements agricoles",
       "btsa gdea",
-      "genie des equipements agricoles",
+      "btsa agronomie et cultures durables",
       "btsa acd",
-      "agronomie et cultures durables",
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
+      "btsa productions vegetales",
       "btsa pv",
-      "productions vegetales",
+      "btsa gestion forestiere",
       "btsa gf",
-      "gestion forestiere",
 
       // compléments
       "certiphyto",
-      "caces r482",
+      "certiphyto operateur",
+      "certiphyto opérateur",
+      "formation a la conduite des engins agricoles",
       "formation conduite engins agricoles",
       "fcea",
+      "caces r482",
+      "formation securite et maintenance de premier niveau des materiels agricoles",
       "fsm1",
-      "maintenance de premier niveau",
+      "fsm1 ma",
     ],
     deny: [
       "taxi",
@@ -158,327 +196,452 @@ export const TRAINING_WHITELIST: TrainingWhitelist = {
       "btp",
       "travaux publics",
       "poids lourd",
-      "routier",
+      "transport routier",
+      "livreur",
+      "livraison",
     ],
   },
 
-  // =========================
-  // 3) RESPONSABLE SILO
-  // =========================
+  // =========================================================
+  // 3) Responsable Silo
+  // jobKey = "responsable_silo"
+  // =========================================================
   responsable_silo: {
     allow: [
+      // infra-bac
       "capa metiers de l agriculture",
       "capa ma",
       "capa productions agricoles",
       "capa pa",
+      "bpa travaux de la production agricole",
       "bpa tpa",
+      "bpa ouvrier agricole polyvalent",
       "bpa oap",
 
+      // bac
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
+      "bac professionnel productions vegetales",
       "bac pro pv",
-      "bac pro productions vegetales",
+      "bac professionnel agroequipement",
       "bac pro ae",
-      "bac pro agroequipement",
+      "bac professionnel maintenance des materiels",
       "bac pro mm ma",
-      "maintenance des materiels option materiels agricoles",
+      "bac professionnel procedes de la chimie de l eau et des papiers cartons",
       "bac pro pcepc",
-      "procedes de la chimie de l eau et des papiers cartons",
+      "bac pro pcepc",
 
+      // bac+2
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
+      "btsa agronomie et cultures durables",
       "btsa acd",
+      "btsa productions vegetales",
       "btsa pv",
+      "btsa genie des equipements agricoles",
       "btsa gdea",
+      "btsa qualite alimentation innovation et maitrise sanitaire",
       "btsa qaiams",
-      "qualite alimentation innovation et maitrise sanitaire",
+      "bts maintenance des systemes",
       "bts ms",
-      "maintenance des systemes",
+      "bts gestion des transports et logistique associee",
       "bts gtla",
-      "gestion des transports et logistique associee",
-      "logistique associee",
 
-      "lp pv",
+      // bac+3
+      "licence professionnelle productions vegetales",
       "lp productions vegetales",
-      "lp agro",
+      "lp pv",
+      "licence professionnelle agronomie",
       "lp agronomie",
+      "lp agro",
+      "licence professionnelle qhse",
       "lp qhse",
-      "qualite hygiene securite sante environnement",
+      "licence professionnelle logistique et pilotage des flux",
       "lp lpf",
-      "logistique et pilotage des flux",
+      "licence professionnelle management des organisations agricoles et agroalimentaires",
       "lp moaa",
-      "management des organisations agricoles et agroalimentaires",
 
+      // compléments
       "certiphyto",
+      "formation securite silo",
+      "fssa",
+      "formation prevention des risques d explosion",
       "atex",
       "caces r482",
-      "formation securite silo",
-      "atmospheres confinees",
-      "tracabilite cereales",
-      "qualite cereales",
+      "formation hygiene securite qualite tracabilite des cereales",
+      "hsqt cereales",
+      "hsqt céréales",
     ],
-    deny: ["eau", "gemeau", "aquaculture", "pisciculture"],
+    deny: ["aquaculture", "pisciculture", "gemeau", "assainissement", "eau", "rivière", "riviere"],
   },
 
-  // =========================
-  // 4) AGENT SILO
-  // =========================
+  // =========================================================
+  // 4) Agent de Silo
+  // jobKey = "silo"
+  // =========================================================
   silo: {
     allow: [
+      // infra-bac
       "capa metiers de l agriculture",
       "capa ma",
       "capa productions agricoles",
       "capa pa",
       "capa grandes cultures",
       "capa gc",
+      "bpa travaux de la production agricole",
       "bpa tpa",
+      "bpa ouvrier agricole polyvalent",
       "bpa oap",
+      "bpa travaux des cultures",
       "bpa tc",
+      "bpa travaux de conduite et entretien des engins agricoles",
       "bpa tceea",
 
+      // bac
+      "bac professionnel productions vegetales",
       "bac pro pv",
-      "bac pro productions vegetales",
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
+      "bac professionnel agroequipement",
       "bac pro ae",
-      "bac pro agroequipement",
+      "bac professionnel maintenance des materiels",
       "bac pro mm ma",
-      "bac pro log",
+      "bac professionnel logistique",
       "bac pro logistique",
+      "bac pro log",
+      "bac professionnel procedes de la chimie de l eau et des papiers cartons",
       "bac pro pcepc",
 
+      // bac+2
+      "btsa agronomie et cultures durables",
       "btsa acd",
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
+      "btsa productions vegetales",
       "btsa pv",
+      "btsa genie des equipements agricoles",
       "btsa gdea",
+      "bts maintenance des systemes",
       "bts ms",
-      "maintenance des systemes",
+      "bts gestion des transports et logistique associee",
       "bts gtla",
-      "logistique associee",
 
+      // compléments
       "certiphyto",
+      "formation securite en silo",
+      "formation espaces confines",
+      "fsec",
       "atex",
       "caces r482",
-      "formation securite silo",
-      "espaces confines",
-      "tracabilite cereales",
-      "qualite cereales",
+      "formation hygiene qualite tracabilite des cereales",
+      "hqt cereales",
+      "hqt céréales",
     ],
-    deny: ["eau", "gemeau", "aquaculture", "pisciculture"],
+    deny: ["aquaculture", "pisciculture", "gemeau", "assainissement", "eau", "rivière", "riviere"],
   },
 
-  // =========================
-  // 5) RESPONSABLE LOGISTIQUE
-  // =========================
+  // =========================================================
+  // 5) Responsable logistique
+  // jobKey = "responsable_logistique"
+  // =========================================================
   responsable_logistique: {
     allow: [
-      "bac pro log",
+      // bac
+      "bac professionnel logistique",
       "bac pro logistique",
+      "bac pro log",
+      "bac professionnel organisation de transport de marchandises",
       "bac pro otm",
-      "organisation de transport de marchandises",
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
+      "bac professionnel maintenance des materiels",
       "bac pro mm",
-      "maintenance des materiels",
+      "bac professionnel productions vegetales",
       "bac pro pv",
 
+      // bac+2
+      "bts gestion des transports et logistique associee",
       "bts gtla",
-      "gestion des transports et logistique associee",
-      "bts log",
       "bts logistique",
+      "bts log",
+      "bts support a l action manageriale",
       "bts sam",
-      "support a l action manageriale",
-
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
+      "btsa agronomie et cultures durables",
       "btsa acd",
+      "btsa genie des equipements agricoles",
       "btsa gdea",
 
+      // bac+3
+      "but management de la logistique et des transports",
       "but mlt",
-      "management de la logistique et des transports",
+      "but techniques de commercialisation",
       "but tc",
-      "licence professionnelle lpf",
-      "logistique et pilotage des flux",
+      "licence professionnelle logistique et pilotage des flux",
+      "lp lpf",
+      "licence professionnelle management de la supply chain",
       "lp msc",
-      "management de la supply chain",
+      "licence professionnelle logistique agroalimentaire",
       "lp la",
-      "logistique agroalimentaire",
+      "licence professionnelle management des organisations agricoles et agroalimentaires",
       "lp moaa",
 
+      // bac+4/5
+      "master logistique et transport",
       "master lt",
-      "logistique et transport",
+      "master supply chain management",
       "master scm",
-      "supply chain management",
+      "master management des organisations",
       "master mo",
-      "management des organisations",
+      "master management des entreprises agricoles et agroalimentaires",
       "master meaa",
+      "diplome d ingenieur en logistique",
       "ingenieur log",
       "ingenieur gi",
       "ingenieur agro",
+      "genie industriel",
+      "génie industriel",
 
       // compléments
       "caces r489",
-      "gestion des stocks",
-      "tracabilite",
-      "reglementation transport",
-      "securite transport",
-      "management d equipe logistique",
+      "formation gestion des stocks et tracabilite",
+      "gst",
+      "formation reglementation transport et securite",
+      "rts",
+      "formation management d equipe logistique",
+      "mel",
+      "formation systemes d information logistique",
       "erp",
       "wms",
-      "systemes d information logistique",
+      "sil erp wms",
     ],
-    deny: ["transport de personnes", "voyageurs", "taxi", "vtc"],
+    deny: [
+      "chauffeur",
+      "taxi",
+      "vtc",
+      "transport de voyageurs",
+      "hotellerie",
+      "hôtellerie",
+      "restauration",
+      "tourisme",
+    ],
   },
 
-  // =========================
-  // 6) MAGASINIER / CARISTE
-  // =========================
+  // =========================================================
+  // 6) Magasinier / Cariste
+  // jobKey = "magasinier_cariste"
+  // =========================================================
   magasinier_cariste: {
     allow: [
+      // infra-bac
       "cap operateur logistique",
       "cap ol",
-      "capa ma",
       "capa metiers de l agriculture",
-      "capa pa",
+      "capa ma",
       "capa productions agricoles",
+      "capa pa",
       "capa maintenance des materiels",
       "capa mm",
+      "bpa ouvrier agricole polyvalent",
       "bpa oap",
+      "bpa travaux de la production agricole",
       "bpa tpa",
 
-      "bac pro log",
+      // bac
+      "bac professionnel logistique",
       "bac pro logistique",
+      "bac pro log",
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
+      "bac professionnel agroequipement",
       "bac pro ae",
-      "bac pro agroequipement",
+      "bac professionnel maintenance des materiels",
       "bac pro mm",
-      "maintenance des materiels",
+      "bac professionnel organisation de transport de marchandises",
       "bac pro otm",
 
-      "bts log",
+      // bac+2
       "bts logistique",
+      "bts log",
+      "bts gestion des transports et logistique associee",
       "bts gtla",
+      "btsa genie des equipements agricoles",
       "btsa gdea",
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
 
       // compléments
       "caces r489",
       "caces r482",
-      "gestes et postures",
-      "formation securite entrepot",
-      "zones de stockage",
-      "tracabilite",
-      "gestion des stocks",
+      "formation gestes et postures",
+      "gp",
+      "formation securite en entrepot",
+      "formation securite en entrepôt",
+      "fses",
+      "formation tracabilite et gestion des stocks",
+      "tgs",
     ],
-    deny: ["vendeur", "commerce", "jardinerie", "animalerie"],
+    deny: [
+      "vendeur",
+      "vente",
+      "commerce",
+      "commercial",
+      "jardinerie",
+      "animalerie",
+    ],
   },
 
-  // =========================
-  // 7) SERVICES TECHNIQUES (maintenance)
-  // =========================
+  // =========================================================
+  // 7) Responsable services techniques
+  // jobKey = "maintenance"
+  // =========================================================
   maintenance: {
     allow: [
+      // bac
+      "bac professionnel maintenance des systemes de production connectes",
       "bac pro mspc",
-      "maintenance des systemes de production connectes",
+      "bac professionnel maintenance des materiels",
       "bac pro mm ma",
-      "maintenance des materiels option materiels agricoles",
+      "bac professionnel melec",
       "bac pro melec",
-      "metiers de l electricite",
+      "bac professionnel pilotage de systemes de production automatisee",
       "bac pro pspa",
-      "pilotage de systemes de production automatisee",
+      "bac professionnel agroequipement",
       "bac pro ae",
-      "agroequipement",
 
+      // bac+2
+      "bts maintenance des systemes",
       "bts ms",
-      "maintenance des systemes",
+      "bts electrotechnique",
       "bts et",
-      "electrotechnique",
+      "bts conception et realisation de systemes automatiques",
       "bts crsa",
-      "conception et realisation de systemes automatiques",
+      "bts fluides energies domotique",
       "bts fed",
-      "fluides energies domotique",
+      "bts genie industriel et maintenance",
       "bts gim",
-      "genie industriel et maintenance",
+      "btsa genie des equipements agricoles",
       "btsa gdea",
 
+      // bac+3
+      "but genie industriel et maintenance",
       "but gim",
-      "licence professionnelle msi",
-      "maintenance des systemes industriels",
+      "licence professionnelle maintenance des systemes industriels",
+      "lp msi",
+      "licence professionnelle metiers de l electricite et de l energie",
       "lp mee",
-      "metiers de l electricite et de l energie",
+      "licence professionnelle automatismes et systemes industriels",
       "lp asi",
-      "automatismes et systemes industriels",
+      "licence professionnelle maintenance en agroequipements",
       "lp mae",
-      "maintenance en agroequipements",
 
+      // bac+4/5
+      "master maintenance et fiabilite des systemes industriels",
       "master mfsi",
-      "maintenance et fiabilite des systemes industriels",
+      "master genie industriel",
       "master gi",
-      "genie industriel",
+      "master energie et systemes",
       "master es",
-      "energie et systemes",
+      "diplome d ingenieur en genie industriel",
       "ingenieur gi",
+      "diplome d ingenieur en maintenance industrielle",
       "ingenieur mi",
       "ingenieur et",
       "ingenieur auto",
 
       // compléments
       "habilitations electriques",
+      "habilitations électriques",
       "b0",
       "h0v",
       "b2v",
       "br",
-      "management d equipe technique",
-      "securite des installations industrielles",
+      "formation management d equipe technique",
+      "met",
+      "formation securite des installations industrielles",
+      "fsii",
+      "formation reglementation icpe",
       "icpe",
-      "gestion de projets techniques",
-      "maintenance preventive",
+      "formation gestion de projets techniques",
+      "gpt mp",
     ],
-    deny: ["informatique", "reseaux", "réseaux", "telecom", "télécom", "cyber", "data"],
+    deny: [
+      "developpement web",
+      "développement web",
+      "dev web",
+      "informatique",
+      "reseaux",
+      "réseaux",
+      "cyber",
+      "data",
+      "marketing",
+      "commerce",
+    ],
   },
 
-  // =========================
-  // 8) CONTROLEUR QUALITE
-  // =========================
+  // =========================================================
+  // 8) Contrôleur qualité
+  // jobKey = "controleur_qualite"
+  // =========================================================
   controleur_qualite: {
     allow: [
+      // bac
+      "bac professionnel bio-industries de transformation",
       "bac pro bit",
-      "bio industries de transformation",
+      "bac professionnel laboratoire controle qualite",
       "bac pro lcq",
-      "laboratoire controle qualite",
+      "bac professionnel procedes de la chimie de l eau et des papiers cartons",
       "bac pro pcepc",
+      "bac professionnel stl",
       "bac pro stl",
-      "sciences et technologies de laboratoire",
+      "bac professionnel productions vegetales",
       "bac pro pv",
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
 
+      // bac+2
+      "btsa qualite alimentation innovation et maitrise sanitaire",
       "btsa qaiams",
-      "qualite alimentation innovation et maitrise sanitaire",
+      "btsa agronomie et cultures durables",
       "btsa acd",
+      "btsa productions vegetales",
       "btsa pv",
+      "bts bioanalyses et controles",
       "bts bc",
-      "bioanalyses et controles",
+      "bts qualite dans les industries alimentaires et les bio-industries",
       "bts qiabi",
-      "qualite dans les industries alimentaires",
+      "bts metiers de la chimie",
       "bts mc",
-      "metiers de la chimie",
+      "bts analyses de biologie medicale",
       "bts abm",
-      "analyses de biologie medicale",
 
+      // bac+3
+      "but genie biologique",
       "but gb sa",
-      "genie biologique",
-      "sciences de l aliment",
+      "but qualite logistique industrielle et organisation",
       "but qlio",
-      "qualite logistique industrielle et organisation",
+      "licence professionnelle qhse",
       "lp qhse",
+      "licence professionnelle controle qualite",
+      "lp controle qualite",
       "lp cq",
-      "controle qualite",
+      "licence professionnelle bio-industries et biotechnologies",
       "lp bib",
-      "bio industries et biotechnologies",
+      "licence professionnelle productions vegetales",
       "lp pv",
 
+      // bac+4/5
+      "master qualite securite environnement",
       "master qse",
       "master qhse",
+      "master sciences et technologies des aliments",
       "master sta",
-      "sciences et technologies des aliments",
+      "master qualite et securite des aliments",
       "master qsa",
-      "qualite et securite des aliments",
+      "diplome d ingenieur agroalimentaire",
       "ingenieur agroalim",
+      "diplome d ingenieur agronome",
       "ingenieur agro",
 
       // compléments
@@ -487,219 +650,303 @@ export const TRAINING_WHITELIST: TrainingWhitelist = {
       "iso 22000",
       "ifs",
       "brc",
-      "tracabilite",
-      "audit qualite",
+      "formation tracabilite",
+      "tss",
+      "formation audit qualite interne",
+      "aqi",
       "certiphyto",
     ],
-    deny: ["cosmetique", "cosmétique", "pharmaceutique"],
+    deny: [
+      "eau",
+      "gemeau",
+      "aquaculture",
+      "pisciculture",
+      "immobilier",
+      "assurance",
+      "banque",
+      "marketing",
+    ],
   },
 
-  // =========================
-  // 9) AGREEUR
-  // =========================
+  // =========================================================
+  // 9) Agréeur
+  // jobKey = "agreeur"
+  // =========================================================
   agreeur: {
     allow: [
-      "capa ma",
+      // infra-bac
       "capa metiers de l agriculture",
+      "capa ma",
+      "capa productions agricoles",
       "capa pa",
+      "bpa travaux de la production agricole",
       "bpa tpa",
+      "bpa ouvrier agricole polyvalent",
       "bpa oap",
 
+      // bac
+      "bac professionnel productions vegetales",
       "bac pro pv",
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
+      "bac professionnel bio-industries de transformation",
       "bac pro bit",
+      "bac professionnel laboratoire controle qualite",
       "bac pro lcq",
+      "bac professionnel stl",
       "bac pro stl",
 
+      // bac+2
+      "btsa agronomie et cultures durables",
       "btsa acd",
+      "btsa productions vegetales",
       "btsa pv",
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
+      "btsa qualite alimentation innovation et maitrise sanitaire",
       "btsa qaiams",
+      "bts bioanalyses et controles",
       "bts bc",
-      "bioanalyses et controles",
+      "bts qualite dans les industries alimentaires et les bio-industries",
       "bts qiabi",
 
+      // bac+3
+      "licence professionnelle productions vegetales",
       "lp pv",
+      "licence professionnelle agronomie",
       "lp agro",
+      "licence professionnelle qhse",
       "lp qhse",
+      "licence professionnelle controle qualite",
       "lp cq",
+      "but genie biologique",
       "but gb sa",
 
-      // compléments agréage
-      "agreage",
-      "agréage",
-      "cereales",
-      "oleagineux",
-      "echantillonnage",
-      "classement des grains",
-      "metrologie",
-      "reglementation commerciale des grains",
+      // compléments
+      "formation agreage",
+      "formation agréage",
+      "faco",
+      "formation methodes d echantillonnage",
+      "formation méthodes d’échantillonnage",
+      "fmeg",
+      "formation metrologie",
+      "fmuaa",
+      "formation reglementation commerciale des grains",
+      "frcg",
       "certiphyto",
     ],
-    deny: ["aquaculture", "pisciculture", "gemeau"],
+    deny: ["eau", "gemeau", "aquaculture", "pisciculture", "marketing", "commerce"],
   },
 
-  // =========================
-  // 10) CONDUCTEUR DE LIGNE
-  // =========================
+  // =========================================================
+  // 10) Conducteur de ligne
+  // jobKey = "conducteur_ligne"
+  // =========================================================
   conducteur_ligne: {
     allow: [
+      // infra-bac
+      "cap conducteur d installations de production",
       "cap cip",
-      "conducteur d installations de production",
+      "cap operateur de fabrication",
       "cap of",
-      "operateur de fabrication",
+      "capa metiers de l agriculture",
       "capa ma",
-      "ateliers de transformation",
+      "bpa bio-industries de transformation",
       "bpa bit",
-      "bio industries de transformation",
+      "bpa conducteur de machines de transformation",
       "bpa cmt",
-      "conducteur de machines de transformation",
 
+      // bac
+      "bac professionnel pilotage de systemes de production automatisee",
       "bac pro pspa",
-      "pilotage de systemes de production automatisee",
+      "bac professionnel bio-industries de transformation",
       "bac pro bit",
+      "bac professionnel procedes de la chimie de l eau et des papiers cartons",
       "bac pro pcepc",
+      "bac professionnel maintenance des systemes de production connectes",
       "bac pro mspc",
-      "maintenance des systemes de production connectes",
+      "bac professionnel industries de procedes",
       "bac pro ip",
-      "industries de procedes",
 
+      // bac+2
+      "bts pilotage de procedes",
       "bts pp",
-      "pilotage de procedes",
+      "bts maintenance des systemes",
       "bts ms",
-      "maintenance des systemes",
+      "bts conception et realisation de systemes automatiques",
       "bts crsa",
-      "conception et realisation de systemes automatiques",
+      "bts bioanalyses et controles",
       "bts bc",
-      "bioanalyses et controles",
+      "btsa genie des equipements agricoles",
       "btsa gdea",
 
+      // bac+3
+      "but genie industriel et maintenance",
       "but gim",
+      "but genie biologique",
       "but gb bi",
-      "genie biologique",
-      "bio industries",
+      "licence professionnelle conduite de lignes automatisees",
       "lp cla",
-      "conduite de lignes automatisees",
+      "licence professionnelle maintenance des systemes industriels",
       "lp msi",
-      "maintenance des systemes industriels",
+      "licence professionnelle bio-industries et transformation",
       "lp bit",
-      "bio industries et transformation",
 
       // compléments
+      "formation conduite de lignes automatisees",
+      "cla",
+      "formation maintenance de premier niveau",
       "tpm",
-      "maintenance de premier niveau",
       "haccp",
-      "qualite",
-      "tracabilite",
+      "formation qualite et tracabilite",
+      "qt",
       "habilitations electriques",
       "heb",
-      "conduite de lignes automatisees",
     ],
-    deny: ["viticulture", "vigne", "vin", "horticulture", "paysage"],
+    deny: ["viticulture", "vigne", "vin", "horticulture", "paysage", "aquaculture", "pisciculture"],
   },
 
-  // =========================
-  // 11) TECHNICIEN CULTURE
-  // =========================
+  // =========================================================
+  // 11) Technicien culture
+  // jobKey = "technicien_culture"
+  // =========================================================
   technicien_culture: {
     allow: [
+      // bac
+      "bac professionnel productions vegetales",
       "bac pro pv",
-      "bac pro productions vegetales",
+      "bac professionnel conduite et gestion de l entreprise agricole",
       "bac pro cgea",
+      "bac technologique stav",
       "bac techno stav",
-      "sciences et technologies de l agronomie et du vivant",
 
+      // bac+2
+      "btsa agronomie et cultures durables",
       "btsa acd",
+      "btsa productions vegetales",
       "btsa pv",
+      "btsa analyse conduite et strategie de l entreprise agricole",
       "btsa acse",
+      "btsa developpement animation des territoires ruraux",
       "btsa datr",
-      "developpement animation des territoires ruraux",
+      "btsa technico commercial",
       "btsa tc bsa",
 
+      // bac+3
+      "licence professionnelle productions vegetales",
       "lp pv",
+      "licence professionnelle agronomie",
       "lp agro",
+      "licence professionnelle conseil en production agricole",
       "lp cpa",
-      "conseil en production agricole",
+      "licence professionnelle agriculture durable et agroecologie",
       "lp ada",
-      "agriculture durable",
-      "agroecologie",
+      "licence professionnelle management des organisations agricoles et agroalimentaires",
       "lp moaa",
 
+      // bac+4/5
       "master agronomie",
+      "master agro",
       "master agroecologie",
+      "master agroécologie",
+      "master ae",
       "master sciences du vegetal",
+      "master sciences du végétal",
+      "master sv",
+      "diplome d ingenieur agronome",
       "ingenieur agro",
 
       // compléments
       "certiphyto",
-      "diagnostic agronomique",
-      "protection integree des cultures",
+      "formation conseil et diagnostic agronomique",
+      "cda",
+      "formation protection integree des cultures",
+      "pic",
+      "formation outils d aide a la decision",
       "oad",
+      "cartographie",
       "teledetection",
-      "pac",
+      "télédétection",
+      "formation reglementation environnementale et pac",
+      "repac",
     ],
-    deny: ["viticulture", "vigne", "vin", "aquaculture", "pisciculture"],
+    deny: ["elevage", "élevage", "viticulture", "vigne", "vin", "aquaculture", "pisciculture", "marketing"],
   },
 
-  // =========================
-  // 12) COMMERCIAL EXPORT
-  // =========================
+  // =========================================================
+  // 12) Commercial export
+  // jobKey = "commercial_export"
+  // =========================================================
   commercial_export: {
     allow: [
+      // bac
       "bac general",
-      "stmg",
+      "bac général",
+      "bac technologique stmg",
       "bac techno stmg",
-      "stav",
+      "bac technologique stav",
       "bac techno stav",
+      "bac professionnel metiers du commerce et de la vente",
       "bac pro mcv",
-      "metiers du commerce et de la vente",
 
+      // bac+2
+      "bts commerce international",
       "bts ci",
-      "commerce international",
+      "bts negociation et digitalisation de la relation client",
       "bts ndrc",
-      "negociation et digitalisation de la relation client",
+      "bts management commercial operationnel",
       "bts mco",
-      "management commercial operationnel",
+      "bts conseil et commercialisation de solutions techniques",
       "bts ccst",
-      "conseil et commercialisation de solutions techniques",
       "btsa tc ab",
+      "btsa technico commercial",
       "btsa tc bsa",
 
+      // bac+3
+      "but techniques de commercialisation",
       "but tc",
       "but gaco",
-      "gestion administrative et commerciale des organisations",
-      "lp ci",
+      "but gestion administrative et commerciale des organisations",
       "licence professionnelle commerce international",
+      "lp ci",
+      "licence professionnelle metiers du commerce international",
       "lp mci",
-      "metiers du commerce international",
+      "licence professionnelle commerce et vente en agroalimentaire",
       "lp cva",
-      "commerce et vente en agroalimentaire",
+      "licence professionnelle management des echanges internationaux",
       "lp mei",
-      "management des echanges internationaux",
+      "licence professionnelle technico-commercial",
+      "licence professionnelle technico commercial",
       "lp tc",
 
+      // bac+4/5
+      "master commerce international",
       "master ci",
-      "commerce international",
+      "master management international",
       "master mi",
-      "management international",
+      "master marketing international",
       "master mki",
-      "marketing international",
+      "master commerce et affaires internationales",
       "master cai",
-      "commerce et affaires internationales",
+      "master management des entreprises agricoles et agroalimentaires",
       "master meaa",
+      "diplome d ecole de commerce",
       "ecole de commerce",
+      "diplome d ingenieur agronome",
       "ingenieur agro",
 
       // compléments
       "incoterms",
       "douanes",
-      "logistique internationale",
-      "reglementation sanitaire",
-      "phytosanitaire",
-      "negociation interculturelle",
-      "langues",
-      "anglais",
+      "formation logistique internationale",
+      "lit",
+      "formation reglementation sanitaire et phytosanitaire export",
+      "rspe",
+      "formation negociation interculturelle",
+      "ni",
+      "formation langues etrangeres professionnelles",
+      "lep",
     ],
-    deny: ["tourisme", "hotellerie", "hôtellerie", "restauration"],
+    deny: ["tourisme", "hotellerie", "hôtellerie", "restauration", "immobilier", "assurance", "banque"],
   },
 };
