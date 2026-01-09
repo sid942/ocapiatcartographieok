@@ -52,7 +52,7 @@ interface JobProfile {
   hard_distance_cap_km?: number;
 }
 
-const DEBUG = false;
+const DEBUG = true;
 const SERVER_VERSION = "index.ts@2026-01-09-v4-ultra-fixed";
 const FETCH_TIMEOUT_MS = 10_000;
 
